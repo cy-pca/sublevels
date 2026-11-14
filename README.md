@@ -23,7 +23,7 @@ any other Direct Connect implementation. See [CLEANROOM.md](CLEANROOM.md).
 | `spec/` | The protocol spec that implementers work from, with sources |
 | `server/` | The arisrvx program and server document |
 | `client/` | The client component set |
-| `docs/` | Roadmap and design notes |
+| `docs/` | [Roadmap](docs/ROADMAP.md) and design notes |
 
 ## License
 
