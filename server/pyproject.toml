@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sublevels"
+version = "0.0.1"
+description = "A Direct Connect hub for the Ariadne stack, run as an arisrvx service"
+readme = "README.md"
+license = { text = "MIT" }
+# arisrvx embeds CPython 3.12 (cvcpkg's python312), so the service targets it.
+requires-python = ">=3.12,<3.13"
+# pycvc (pycvc.ariadne: Host, serve_asgi, export) is not on PyPI. arisrvx carries pycvc.ariadne
+# built in; under plain python it comes from cvcpkg's pycvc-cp312.
+dependencies = ["fastapi", "uvicorn"]
+
+[project.optional-dependencies]
+test = ["pytest", "httpx"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sublevels = ["nmdc/README.md"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

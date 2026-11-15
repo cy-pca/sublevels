@@ -1,0 +1,68 @@
+name: ci
+
+# The server's tests, on every push to main and every pull request:
+#
+#   unit    pytest on GitHub's Python 3.12 with fastapi, uvicorn, httpx and pytest from PyPI: the
+#           service and the HTTP API. The tests that need pycvc skip here.
+#   arisrvx arisrvx, pycvc-cp312 and the ASGI stack from cvcpkg.org (server/ci/install.sh), as an
+#           operator installs them. pytest on cvcpkg's python3.12 with pycvc beside it (the Host
+#           tests, `python -m sublevels.server` end to end, and the S7 ServerHarness tests once the
+#           installed pycvc has it), then server/ci/smoke.sh: the service in arisrvx, /healthz,
+#           SIGTERM, a clean exit.
+#
+# GitHub-hosted runners only: this repository is public, and a pull request's workflows must
+# never reach the self-hosted runners on catx-03.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install fastapi, uvicorn, httpx and pytest (PyPI)
+        run: python -m pip install --quiet fastapi uvicorn httpx pytest
+      - name: pytest
+        run: python -m pytest -rs
+
+  arisrvx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # The Host and `python -m sublevels.server` tests must run here, never skip.
+      SUBLEVELS_REQUIRE_PYCVC: '1'
+      # The ServerHarness tests need libcvc S7, which the published 3.7.13 does not have. Set to
+      # 1 when server/ci/install.sh moves to 3.7.14.
+      SUBLEVELS_REQUIRE_HARNESS: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-cvcpkg
+      - name: Install arisrvx, pycvc and the ASGI stack (cvcpkg)
+        run: bash server/ci/install.sh ~/sublevels-ci
+      - name: pytest (cvcpkg's python3.12, pycvc beside it)
+        working-directory: server
+        run: |
+          ~/sublevels-ci/deps/bin/python3.12 -m pytest -rs -p no:cacheprovider | tee "$RUNNER_TEMP/pytest.log"
+          if grep -q "SKIPPED.*ServerHarness" "$RUNNER_TEMP/pytest.log"; then
+            echo "::notice::the ServerHarness tests skipped: the installed pycvc has no libcvc S7 (it comes with libcvc 3.7.14)"
+          fi
+      - name: arisrvx smoke run
+        run: bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
