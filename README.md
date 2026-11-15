@@ -20,7 +20,7 @@ any other Direct Connect implementation. See [CLEANROOM.md](CLEANROOM.md).
 
 | Path | What |
 |---|---|
-| `spec/` | The protocol spec that implementers work from, with sources (planned) |
+| [`spec/`](spec/README.md) | The protocol spec that implementers work from, with sources |
 | [`server/`](server/README.md) | The `sublevels` Python package, its arisrvx launcher and server document, and their tests |
 | `client/` | The client component set (planned) |
 | `docs/` | [Roadmap](docs/ROADMAP.md) and design notes |
