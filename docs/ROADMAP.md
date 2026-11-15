@@ -15,15 +15,20 @@ our forks of them.
 
 ## Decisions
 
-Settled 2026-11-14 (Joe: "Draft the roadmap with those defaults").
+D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 are Joe's answers to the first draft's open questions, the same day.
 
 | # | Decision |
 |---|----------|
-| D1 | **The hub is Python on arisrvx's script loop.** An asyncio NMDC listener (TCP 411, and NMDCS over TLS) runs on the loop arisrvx already gives a program (libcvc ARIADNE_SCRIPTING_HOSTS §6.5; S1 transfix/libcvc#1081, S2 #1122, S5 #1130, S6 #1147, S7). FastAPI runs on the same loop for admin and webhooks. Hub state is published as a `sublevels.*` subtree, and native clients act through `room-call`. The hub carries signalling, chat and search only; file transfers stay peer to peer, as in NMDC. |
+| D1 | **The hub is Python on arisrvx's script loop.** An asyncio NMDC listener (TCP 411, and NMDCS over TLS) runs on the loop arisrvx already gives a program (libcvc ARIADNE_SCRIPTING_HOSTS §6.5; S1 transfix/libcvc#1081, S2 #1122, S5 #1130, S6 #1147, S7). FastAPI runs on the same loop for admin and webhooks. Hub state is published as a `sublevels.*` subtree, and native clients act through `room-call`. The hub carries signalling, chat and search. File transfers are peer to peer, as in NMDC, or for native clients go through the relay (D6). |
 | D2 | **nicotina reaches sublevels natively over the state plane** in every host: `ari` (FTXUI, tvision), `arigl` and the browser. **It reaches vanilla hubs through generic libcvc host features**: TCP and TLS sockets, Tiger-tree hashing, and host-held share and download folders (the X-items below). This keeps nicotina's rule of no custom host and no compiled-in widget. Browsers cannot open raw TCP, so a browser reaches a vanilla hub through a WebSocket-to-TCP gateway in the sublevels service. Sharing and transfers to vanilla peers may be native-only at first. |
 | D3 | **Conference features go native first.** Channels, calls, media and end-to-end encrypted messages reach nicotina over arisrvx, not over NMDC. Extensions on the NMDC wire (`$Supports` flags) come last (M6), and only if third-party or forked clients need them. The first clean-room spec is therefore vanilla NMDC. |
 | D4 | **NMDC first, ADC later (M5).** Modern DC++ speaks both protocols. |
 | D5 | **Clean-room workflow.** One spec-writer session may read the GPL implementations, the forks and the private notes archive (transfix/nmdc-dev). It writes `spec/` in its own words and cites its sources. Implementer sessions see only this repository and the public documents. |
+| D6 | **Native clients support every transfer mode:** active (direct), passive, and **relay mode**. In relay mode two clients exchange data through the arisrvx relay, inside an end-to-end encrypted channel. The relay forwards opaque bytes and cannot read them, and neither client learns the other's IP address. Clients behind NAT therefore reach each other without port forwarding. This replaces the abandoned NMDCpb HubRelay extension. Vanilla clients keep NMDC's active and passive modes. |
+| D7 | **Scale: Verlihub's, per server: 6000+ active clients.** M1 measures whether Python on one loop reaches it. If not, the hot paths (the broadcast and search fan-out) move into native code in libcvc, and the protocol logic stays in Python. |
+| D8 | **Text is Windows-1252 by default**, configurable per hub. This is the code page DC++ and its forks use for NMDC on Western-locale Windows. The hub keeps text as Unicode internally and converts at the NMDC edge. |
+| D9 | **Hub policy, as Verlihub has it.** A message of the day and a rules document, which every user can read (native clients as documents, vanilla clients as chat and commands). Operators can kick a live connection as a warning, and ban a user for a time or permanently. **Accounts are optional.** Every connection gets an identity hash, and a user without an account is that hash. The hash is scoped to the server, so two servers cannot match one user. For native clients it is built as cyprty's device identity is (libcvc ARIADNE_CONFERENCE_ROADMAP §5f: a salted hash of the OS machine id, host name and OS user), plus the address, and is backed by the Ed25519 device key the client must prove. That makes it hard to spoof. Vanilla NMDC clients send no hardware data and hold no key, so their hash can only use the address and what they send (nick, client tag, share). It is weaker, and bans for them also cover addresses and ranges. |
+| D10 | **Public and linked.** sublevels hubs register on public hub lists and answer hub-list pingers. Hubs, conference rooms and holons link into one cluster through libcvc's state federation (cross-node replication: `state_cluster_shard`, hash partitioning, delegation leases). Today that federation trusts every peer (ARIADNE_CONFERENCE_ROADMAP §5c), so linking servers run by different operators needs an authenticated peer model first. |
 
 ## Architecture
 
@@ -51,7 +56,7 @@ Settled 2026-11-14 (Joe: "Draft the roadmap with those defaults").
 - **Identity is TX.WTF's.** Native clients authenticate through the S5 `authenticate` hook with a
   TX.WTF token. NMDC clients log in by nick and password (`$GetPass`/`$MyPass`); the password is a
   hub password the user's TX.WTF account issues, checked against TX.WTF and never stored in the
-  clear. Unregistered guests are a hub setting.
+  clear. Users without an account connect as their identity hash (D9).
 - **Packaging.** The server is a Python package (`sublevels`), run as
   `arisrvx --python -m sublevels.server`, and shipped on cvcpkg with its Python dependencies (all
   on cvcpkg for cp312 already, per §6.5). Under plain `python`, the service and its tests run
@@ -62,7 +67,7 @@ Settled 2026-11-14 (Joe: "Draft the roadmap with those defaults").
 
 | Path | What |
 |---|---|
-| `spec/nmdc/` | The NMDC spec implementers work from: P1-P8 below |
+| `spec/nmdc/` | The NMDC spec implementers work from: P1-P9 below |
 | `spec/adc/` | The ADC spec (M5) |
 | `spec/ext/` | Wire extensions (M6) |
 | `server/` | The `sublevels` Python package, the server document, and their tests |
@@ -81,14 +86,15 @@ own words.
 
 | # | Area | Needed by |
 |---|------|-----------|
-| P1 | Framing and text: the `|` delimiter, `$` commands, escaping, `$Lock`/`$Key`, legacy code pages and UTF-8, limits | M1 |
+| P1 | Framing and text: the `|` delimiter, `$` commands, escaping, `$Lock`/`$Key`, Windows-1252 and other code pages (D8), limits | M1 |
 | P2 | Hub login: `$Supports`, `$ValidateNick`, `$GetPass`/`$MyPass`/`$BadPass`, `$Hello`, `$Version`, `$MyINFO`, `$GetNickList`/`$NickList`/`$OpList`/`$BotList`, `$UserIP`, `$HubName`, `$HubTopic`, `$Quit` | M1 |
 | P3 | Chat and private messages: main chat, `$To`, bots, `$MCTo`-style messages if real clients use them | M1 |
 | P4 | Search: `$Search` active (UDP) and passive (`Hub:`), `$SR` routing back through the hub, TTH searches, flood limits | M1 |
 | P5 | Connection signalling: `$ConnectToMe`, `$RevConnectToMe`, passive-to-passive refusal, NAT-T if clients use it | M1 |
-| P6 | Operator commands: `$Kick`, `$OpForceMove`, `$Close`, redirects, `$UserCommand` | M2 |
+| P6 | Operator commands: `$Kick`, `$OpForceMove`, `$Close`, redirects, `$UserCommand`; how real clients show a kick, a ban and its reason | M2 |
 | P7 | Transport: NMDCS (TLS) and how clients find it, `ZPipe0`/ZLIB compression | M1 (TLS), M2 (ZLIB) |
 | P8 | The client-to-client protocol: `$MyNick`, `$Lock`, `$Direction`, `$ADCGET`/`$ADCSND`, file lists (`files.xml.bz2`), Tiger and TTH, segments, slots | M4 |
+| P9 | Hub-list registration and pinger behaviour: what a pinger sends and reads, and how a hub registers | M2 |
 
 ## libcvc features the client needs
 
@@ -104,9 +110,12 @@ tested in `ari` with both terminal backends as well as `arigl`.
 | X5 | Host-held share folders: the user picks a folder, the host keeps the handle, and documents see only names, sizes and hashes | M4 |
 | X6 | Tiger-tree (TTH) hashing of host-held files, off the frame loop, with a persistent hash cache | M4 |
 | X7 | A host-held download folder, written in chunks at offsets (segmented downloads) | M4 |
+| X8 | Relay streams: an opaque, flow-controlled byte stream between two connections through the relay, addressed by the relay and not by IP. Neither end learns the other's address (D6) | M3 (relay mode) |
+| X9 | End-to-end encryption of a relay stream in the host: a key agreement bound to both device keys, then an authenticated stream cipher (libsodium, as nicotina's L21 uses). The keys stay in the host, never in state | M3 (relay mode) |
 
-The native path (M3) needs no new libcvc features: room-call, server-published subtrees, scoped
-reads and the chat widgets exist today. Any gap found while building M3 is added here.
+The native path (M3) needs no new libcvc features for chat, search and the user list: room-call,
+server-published subtrees, scoped reads and the chat widgets exist today. Relay-mode transfers
+need X8 and X9, and sharing needs X5-X7. Any gap found while building M3 is added here.
 
 ## Milestones
 
@@ -123,10 +132,14 @@ runners only.
     clients that the hub signals;
   - interop runs in CI with ncdc (terminal) and the AirDC++ web client (headless), and by hand with
     EiskaltDC++ and DC++. All are run as black boxes;
-  - measured: memory per user, chat and search fan-out latency, and a soak with a synthetic
-    1000-user load. Set the scale target from these numbers.
+  - measured: memory per user, chat and search fan-out latency, and a soak at 6000+ synthetic
+    clients (D7). If Python on one loop falls short, plan the native fan-out before M2.
 - **M2, part of the host.**
-  - TX.WTF identity: S5 for native clients, hub passwords for NMDC clients.
+  - Identity: identity hashes for every connection (D9); TX.WTF accounts through S5 for native
+    clients and hub passwords for NMDC clients.
+  - Policy (D9): message of the day and rules documents, kick as a warning, temporary and
+    permanent bans by hash, account, address or range.
+  - Public hub lists (P9).
   - Operator commands (P6), ZLIB (P7).
   - An admin API (FastAPI) and an admin document.
   - The `sublevels.*` subtree with scoped reads.
@@ -135,7 +148,8 @@ runners only.
     with TX.WTF and the rooms. TLS is terminated in the service, with the host's certificate,
     because NMDC is raw TCP and the web reverse proxy does not carry it.
 - **M3, nicotina native.** Components in `client/` for the hub list, user list, main chat,
-  private messages and search. nicotina imports them and connects to a sublevels hub in `arigl`,
+  private messages, search, the message of the day and rules, and relay-mode transfers (X8, X9)
+  between native clients. nicotina imports them and connects to a sublevels hub in `arigl`,
   `ari` (FTXUI, tvision) and the browser, with `ari snapshot` tests of each view. Vanilla and
   native users see each other.
 - **M4, nicotina on vanilla hubs.** The X-items in libcvc, then P8. nicotina connects to a vanilla
@@ -149,19 +163,16 @@ runners only.
   over NMDC or ADC: a spec in `spec/ext/` that maps channels, calls, media and E2E messages to
   `$Supports` (NMDC) or feature flags (ADC), written fresh from the conference suite's behaviour.
   The earlier NMDCpb design is input for the spec writer only.
+- **M7, linked.** Hubs, conference rooms and holons in one cluster through libcvc state
+  federation (D10), after an authenticated peer model for servers run by different operators.
 
 ## Open questions
 
-- **Transfers between native clients.** Peer to peer over X1/X2 (native hosts only), relayed
-  through the service (works in the browser, costs the host bandwidth), or both. Decide before M3.
-- **Scale target.** Set from M1's numbers; Python fan-out of search to thousands of users is the
-  part to watch.
-- **Text encoding.** Which legacy code page a hub assumes for clients that don't send UTF-8, and
-  whether that is a per-hub setting.
-- **Abuse and content policy.** A public hub carries users' file sharing. Before a public listing:
-  registration rules, operator tooling, and a stated policy for the operator.
-- **Hub lists and linking.** Whether to register on public hub lists, and whether sublevels hubs
-  link with each other the way TX.WTF instances federate.
 - **The forks.** When to archive transfix/eiskaltdcpp, transfix/eiskaltdcpp-py and
   transfix/verlihub, and retire their catx-03 runners: proposed at M4, once nicotina replaces the
   forked client for our own use.
+- **Relay bandwidth.** Relay mode (D6) puts transfers on the host's uplink. Per-user and per-server
+  limits, and whether relay mode is offered to every user or only some, are decided before M3
+  ships it.
+- **Hash privacy.** The identity hash (D9) covers the address. How long a server keeps hashes and
+  addresses for bans, and what an operator can see, are written down before M2 deploys.
