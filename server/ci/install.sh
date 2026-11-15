@@ -47,5 +47,6 @@ try:
     s7 = True
 except ImportError:
     s7 = False
-print(f"pycvc.ariadne: room-call (S2) {\"yes\" if s2 else \"no\"}, ServerHarness (S7) {\"yes\" if s7 else \"no\"}")
+yn = {True: "yes", False: "no"}
+print("pycvc.ariadne: room-call (S2)", yn[s2] + ", ServerHarness (S7)", yn[s7])
 '
