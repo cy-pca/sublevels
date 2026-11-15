@@ -16,13 +16,13 @@ public specifications as Ariadne documents and an `arisrvx` service.
 This is a clean-room implementation. It contains no code from eiskaltdcpp, DC++, verlihub or
 any other Direct Connect implementation. See [CLEANROOM.md](CLEANROOM.md).
 
-## Layout (planned)
+## Layout
 
 | Path | What |
 |---|---|
-| `spec/` | The protocol spec that implementers work from, with sources |
-| `server/` | The arisrvx program and server document |
-| `client/` | The client component set |
+| `spec/` | The protocol spec that implementers work from, with sources (planned) |
+| [`server/`](server/README.md) | The `sublevels` Python package, its arisrvx launcher and server document, and their tests |
+| `client/` | The client component set (planned) |
 | `docs/` | [Roadmap](docs/ROADMAP.md) and design notes |
 
 ## License
