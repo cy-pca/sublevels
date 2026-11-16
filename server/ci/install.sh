@@ -3,12 +3,13 @@
 # into ROOT/deps, as an operator installs them. ROOT/deps/bin/python3.12 is cvcpkg's CPython, the
 # one arisrvx embeds, and runs the tests with pycvc beside it.
 #
-# The pins: the newest published libcvc release is 3.7.13, which has libcvc S0 and S1 (Host,
-# serve_asgi) but not S2-S7 (export/room-call, authenticate, read scope, ServerHarness). Those come
-# with 3.7.14; then bump LIBCVC and set SUBLEVELS_REQUIRE_HARNESS=1 in ci.yml.
-# libcvc itself is pinned to +cvc.3: arisrvx and pycvc-cp312 3.7.13+cvc.2 were built against it,
-# and the libcvc 3.7.13+cvc.4 republish (2026-11-15) no longer exports symbols they link
-# (cvc::image::save(std::string), cvc::ariadne::register_cvc_uri_handler), so they fail to load.
+# The pins: libcvc 4.0.0, the first release on cvcpkg with libcvc S2-S7 (export/room-call,
+# authenticate, read scope, ServerHarness) in arisrvx and pycvc-cp312. libcvc is pinned to the build
+# arisrvx and pycvc-cp312 4.0.0+cvc.1 were built against (4.0.0+cvc.2, published 2026-11-16 01:02Z,
+# minutes before them; every libcvc symbol arisrvx imports is defined there). Every pin matters:
+# arisrvx and pycvc-cp312 depend on libcvc with no version, and a libcvc republished under the same
+# upstream version has dropped symbols before (3.7.13+cvc.4 broke arisrvx 3.7.13+cvc.2). Move all
+# three together.
 set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: $0 ROOT" >&2; exit 2; }
@@ -16,9 +17,9 @@ mkdir -p "$1"
 root=$(cd "$1" && pwd)
 deps=$root/deps
 
-LIBCVC=${LIBCVC:-3.7.13}
-LIBCVC_BUILD=${LIBCVC_BUILD:-cvc.3}
-ARISRVX_BUILD=${ARISRVX_BUILD:-cvc.2}
+LIBCVC=${LIBCVC:-4.0.0}
+LIBCVC_BUILD=${LIBCVC_BUILD:-cvc.2}
+ARISRVX_BUILD=${ARISRVX_BUILD:-cvc.1}
 
 cvcpkg install \
   "libcvc==$LIBCVC+$LIBCVC_BUILD" \
