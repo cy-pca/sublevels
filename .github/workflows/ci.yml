@@ -10,6 +10,7 @@ name: ci
 #           skip), then server/ci/smoke.sh: the service in arisrvx, its room-call export
 #           registered, /healthz, NMDC and NMDCS logins, SIGTERM, a clean exit.
 #   interop-ncdc  ncdc (Ubuntu's package) as a black box against the hub (server/interop/).
+#   interop-airdcpp  the AirDC++ web client's portable release, through its documented HTTP API.
 #   soak    6000 synthetic clients against the hub; memory, CPU and fan-out latency in the summary.
 #
 # GitHub-hosted runners only: this repository is public, and a pull request's workflows must
@@ -91,6 +92,47 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: interop-ncdc
+          path: ${{ runner.temp }}/interop
+          retention-days: 14
+
+  interop-airdcpp:
+    # The AirDC++ web client's released portable build, run as a black box
+    # (server/interop/airdcpp_interop.py): set up with its documented command-line options and
+    # driven through its documented HTTP API, with an ncdc beside it, checking login, chat, /me,
+    # private messages, search and results, and file-list transfers both ways.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AIRDCPP_URL: https://web-builds.airdcpp.net/stable/airdcpp_2.14.0_webui-2.14.0_64-bit_portable.tar.gz
+      AIRDCPP_SHA256: fe89c40d1bbb11350e5e175f60ca9de325dbc6e5a778024429ba1bdf633bad1a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ncdc and tmux (apt)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ncdc tmux
+      - name: Download AirDC++ 2.14.0 (portable, checked)
+        run: |
+          mkdir -p "$RUNNER_TEMP/airdcpp"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/airdcpp.tar.gz" "$AIRDCPP_URL"
+          echo "$AIRDCPP_SHA256  $RUNNER_TEMP/airdcpp.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/airdcpp.tar.gz" -C "$RUNNER_TEMP/airdcpp"
+          "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" -v
+      - name: AirDC++ interop
+        run: |
+          python server/interop/airdcpp_interop.py \
+            --airdcppd "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" --out "$RUNNER_TEMP/interop"
+      - name: Findings
+        if: always()
+        run: cat "$RUNNER_TEMP/interop/findings.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-airdcpp
           path: ${{ runner.temp }}/interop
           retention-days: 14
 

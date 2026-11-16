@@ -17,6 +17,7 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 | `tools/nmdc_client.py` | A small NMDC client for the tests, the smoke run and the soak |
 | `tools/run_hub.py` | The hub alone on plain asyncio, stdlib only, for interop runs and the soak |
 | `interop/ncdc_interop.py` | ncdc as a black box against the hub, with the hub's captures and findings |
+| `interop/airdcpp_interop.py` | The AirDC++ web client as a black box, through its documented HTTP API |
 | `interop/soak.py` | Synthetic clients toward 6000+ (D7): memory, CPU and fan-out latency |
 | `ci/install.sh`, `ci/smoke.sh` | Install the stack from cvcpkg; run the arisrvx smoke test |
 
