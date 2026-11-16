@@ -179,6 +179,7 @@ class Hub:
         self._ids = 0
         self._publish_timer = None
         self._bad_pass: dict[str, Window] = {}  # identity -> failures
+        self.keyprint = ""  # the NMDCS certificate's (P7 §1), once the listener has loaded it
         bot = self.config.bot_nick
         self.bot_key = nick_key(bot)
         self.bot_info = self._enc(f"$MyINFO $ALL {bot} {escape(self.config.bot_description)}$ $"
@@ -235,6 +236,21 @@ class Hub:
         address to go on; nick, tag and share are added when bans need them (M2)."""
         return hashlib.sha256(f"{self.salt}|{ip}".encode()).hexdigest()[:16]
 
+    def set_keyprint(self, keyprint: str) -> None:
+        """The NMDCS listener loaded a certificate: clients pin this keyprint with ``?kp=``."""
+        self.keyprint = keyprint
+        self._dirty()
+
+    def nmdcs_url(self) -> str:
+        """``nmdcs_address`` with the keyprint (``…/?kp=SHA256/…``), so a client that follows it
+        pins the certificate; "" when the hub has no NMDCS address."""
+        url = self.config.nmdcs_address
+        if not url:
+            return ""
+        if self.keyprint and "kp=" not in url:
+            url = url.rstrip("/") + "/?kp=" + self.keyprint
+        return url
+
     # -- connections -------------------------------------------------------------------------------
 
     def connect(self, conn: Conn, ip: str, port: int, protocol: str = "nmdc",
@@ -253,7 +269,7 @@ class Hub:
             self.close(s, "full")
             return s
         if self.config.tls_required and not tls:  # P7 §1
-            where = self.config.nmdcs_address
+            where = self.nmdcs_url()
             self.bot_say(s, f"This hub takes TLS connections only: connect to {where}." if where
                          else "This hub takes TLS connections only (nmdcs://).")
             if where:
@@ -403,7 +419,7 @@ class Hub:
         self.send(s, f"$Supports {HUB_SUPPORTS}|")
         if self.accounts.is_registered(nick):
             if self.config.password_requires_tls and not s.tls:
-                where = f" at {self.config.nmdcs_address}" if self.config.nmdcs_address else ""
+                where = f" at {self.nmdcs_url()}" if self.config.nmdcs_address else ""
                 self.bot_say(s, f"{nick} is registered. Log in over TLS (nmdcs://){where}: "
                                 "this hub does not take passwords in the clear.")
                 self.counters.refuse("password_needs_tls")
@@ -840,6 +856,7 @@ class Hub:
                                  "op": u.is_op}
         self.tree.set_tree(self.tree_path, {
             "name": self.config.name, "topic": self.config.topic, "bot": self.config.bot_nick,
+            "nmdcs": {"address": self.nmdcs_url(), "keyprint": self.keyprint},
             "users": {"count": len(self.users), "list": users},
         })
 
@@ -851,6 +868,7 @@ class Hub:
         return {
             "hub": self.config.hub_id,
             "users": len(self.users),
+            "nmdcs_keyprint": self.keyprint,
             "connections": dict(live),
             "tls_connections": sum(1 for s in self.sessions.values()
                                    if s.tls and s.state != CLOSED),

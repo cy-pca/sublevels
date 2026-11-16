@@ -9,8 +9,11 @@ a chat line or a search to thousands of users costs one ``transport.write`` per 
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import logging
 import os
+import re
 import ssl
 import time
 from dataclasses import dataclass, field
@@ -144,12 +147,28 @@ def split_listen(address: str) -> tuple[str, int]:
     return host.strip("[]") or "0.0.0.0", int(port)
 
 
+_PEM_CERT = re.compile(r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----", re.S)
+
+
+def keyprint_of(cert_path: str) -> str:
+    """P7 §1 / [ADC-EXT] KEYP: ``SHA256/`` and the base32 (RFC 4648, unpadded) SHA-256 of the
+    hub's certificate (the first in the chain file), as clients pin it with ``?kp=``."""
+    with open(cert_path, encoding="ascii", errors="replace") as f:
+        m = _PEM_CERT.search(f.read())
+    if m is None:
+        raise ValueError(f"{cert_path}: no PEM certificate")
+    der = ssl.PEM_cert_to_DER_cert(m.group(0))
+    return "SHA256/" + base64.b32encode(hashlib.sha256(der).digest()).decode().rstrip("=")
+
+
 class TlsContext:
     """The NMDCS listener's TLS context: TLS 1.2 and 1.3 (P7 §1). It reloads the certificate when
     its file changes; new handshakes use the new one, and open connections are untouched."""
 
-    def __init__(self, cert: str, key: str):
+    def __init__(self, cert: str, key: str, on_reload=None):
         self.cert, self.key = cert, key
+        self.on_reload = on_reload  # called with the new keyprint after every load
+        self.keyprint = ""
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.stamp = None
@@ -161,6 +180,9 @@ class TlsContext:
     def load(self) -> None:
         self.context.load_cert_chain(self.cert, self.key)
         self.stamp = self._stamp()
+        self.keyprint = keyprint_of(self.cert)
+        if self.on_reload is not None:
+            self.on_reload(self.keyprint)
 
     def reload_if_changed(self) -> bool:
         try:
@@ -230,7 +252,7 @@ async def start_listeners(hub: Hub, *, cert_check_every: float = 30.0) -> Listen
             log.warning("NMDCS: no certificate configured (SUBLEVELS_TLS_CERT, SUBLEVELS_TLS_KEY): "
                         "not listening on %s", cfg.nmdcs_listen)
         else:
-            out.tls = TlsContext(cfg.tls_cert, cfg.tls_key)
+            out.tls = TlsContext(cfg.tls_cert, cfg.tls_key, on_reload=hub.set_keyprint)
             h, p = split_listen(cfg.nmdcs_listen)
             server = await loop.create_server(lambda: NmdcConnection(hub, "nmdcs", True), h, p,
                                               ssl=out.tls.context, backlog=cfg.listen_backlog)
