@@ -1,0 +1,75 @@
+name: publish-sublevels
+
+# Publish the sublevels recipe to cvcpkg.org, under the cy-pca organisation. Started by hand, on main
+# only: bump upstream_version in recipes/sublevels/recipe.yaml and server/src/sublevels/__init__.py
+# (cvc_revision for a packaging-only change), merge, then run this. sublevels is Python and documents
+# (platform any, arch noarch), so one GitHub-hosted runner packs the one bundle every platform
+# installs.
+#
+# The token is the CVCPKG_PUBLISHER_TOKEN repository secret: a cvcpkg.org publisher that is a
+# member of the cy-pca organisation. Only the publish step sees it. Without it the run builds,
+# packs and checks the bundle, then fails before publishing anything. Nothing is uploaded as an
+# artifact. cvcpkg publish skips a bundle the registry already has, so a second run is harmless.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: sublevels-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: pack and publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-cvcpkg
+
+      # The bundle, packed from a prefix the recipe was built into.
+      - name: Build and pack
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/prefix"
+          cvcpkg build sublevels --local --platform any --prefix "$prefix"
+          cvcpkg pack sublevels --recipes-dir recipes --no-default-recipes --from-prefix "$prefix" \
+            --platform any --output-dir dist/
+          ls -l dist/
+          n=0
+          for f in dist/*.tar.gz; do
+            case "$(basename "$f")" in
+              sublevels-*-any-noarch-*) n=$((n + 1)) ;;
+              *) echo "::error::$(basename "$f") is not a sublevels any/noarch bundle; publishing nothing"; exit 1 ;;
+            esac
+          done
+          [ "$n" = 1 ] || { echo "::error::expected one sublevels bundle, packed $n"; exit 1; }
+
+      - name: Publish
+        env:
+          CVCPKG_TOKEN: ${{ secrets.CVCPKG_PUBLISHER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CVCPKG_TOKEN:-}" ]; then
+            echo "::error::no CVCPKG_PUBLISHER_TOKEN secret: the bundle packed but was not published"
+            exit 1
+          fi
+          cvcpkg publish dist/*.tar.gz --server https://cvcpkg.org --org cy-pca
+          cvcpkg recipe push sublevels --recipes-dir recipes --no-default-recipes \
+            --server https://cvcpkg.org --org cy-pca
+
+      # As a person installs it: the published bundle and its arisrvx from the registry, then the
+      # installed command, end to end.
+      - name: Install it from cvcpkg.org and run it
+        run: |
+          set -euo pipefail
+          check="$RUNNER_TEMP/check"
+          cvcpkg install sublevels --prefix "$check" --config release --link shared \
+            --no-fallback-to-source
+          "$check/bin/sublevels" version
+          test -x "$check/bin/arisrvx" || { echo "::error::the install has no arisrvx beside sublevels"; exit 1; }
+          bash server/ci/smoke-package.sh "$check"

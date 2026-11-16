@@ -9,6 +9,8 @@ name: ci
 #           tests, `python -m sublevels.server` end to end, and the S7 ServerHarness tests: none may
 #           skip), then server/ci/smoke.sh: the service in arisrvx, its room-call export
 #           registered, /healthz, NMDC and NMDCS logins, SIGTERM, a clean exit.
+#   package the cvcpkg recipe built into a prefix, and the installed `sublevels` command run in each
+#           TX.WTF mode (server/ci/smoke-package.sh).
 #   interop-ncdc  ncdc (Ubuntu's package) as a black box against the hub (server/interop/).
 #   interop-airdcpp  the AirDC++ web client's portable release, through its documented HTTP API.
 #   transfers  ncdc and AirDC++ download each other's files through the hub, over NMDC and NMDCS.
@@ -65,6 +67,32 @@ jobs:
         run: ~/sublevels-ci/deps/bin/python3.12 -m pytest -rs -p no:cacheprovider
       - name: arisrvx smoke run
         run: bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
+
+  package:
+    # The cvcpkg recipe (recipes/sublevels) built into a prefix beside arisrvx and pycvc from
+    # cvcpkg.org, then the installed `sublevels` command run as a user runs it
+    # (server/ci/smoke-package.sh): check, serve with the relay, NMDC, NMDCS and the HTTP API, logins
+    # over both, a clean SIGTERM; once for each TX.WTF mode (the default, off, a separate URL, and a
+    # stand-in txwtf served in the process).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-cvcpkg
+      - name: Install arisrvx, pycvc and the ASGI stack (cvcpkg)
+        run: bash server/ci/install.sh ~/sublevels-ci
+      - name: Build the sublevels recipe into the prefix
+        run: |
+          cvcpkg build sublevels --local --platform any --prefix ~/sublevels-ci/deps
+          ~/sublevels-ci/deps/bin/sublevels version
+      - name: sublevels, TX.WTF default (embedded if installed, else off)
+        run: bash server/ci/smoke-package.sh ~/sublevels-ci/deps
+      - name: sublevels --no-txwtf
+        run: TXWTF_MODE=off bash server/ci/smoke-package.sh ~/sublevels-ci/deps
+      - name: sublevels --txwtf URL
+        run: TXWTF_MODE=https://tx.example bash server/ci/smoke-package.sh ~/sublevels-ci/deps
+      - name: sublevels --txwtf embedded (a stand-in txwtf)
+        run: TXWTF_MODE=stub bash server/ci/smoke-package.sh ~/sublevels-ci/deps
 
   interop-ncdc:
     # ncdc as Ubuntu packages it, run as a black box (server/interop/ncdc_interop.py): three ncdc

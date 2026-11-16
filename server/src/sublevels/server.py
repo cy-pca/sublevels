@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from . import NAMESPACE, __version__, api, rpc
+from . import txwtf_service as txwtf
 from .nmdc import Hub, HubConfig, start_listeners
 from .service import Service
 
@@ -90,9 +91,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p.add_argument("--nmdcs-listen", metavar="ADDR:PORT",
                    help="where the hub listens for NMDCS (TLS), or 'off' ($SUBLEVELS_NMDCS_LISTEN, "
                         "default 0.0.0.0:4111; needs $SUBLEVELS_TLS_CERT and $SUBLEVELS_TLS_KEY)")
+    p.add_argument("--txwtf", default=os.environ.get("SUBLEVELS_TXWTF") or None,
+                   metavar="embedded|URL|off",
+                   help="TX.WTF in this process (embedded, the default when it is installed), a "
+                        "separate instance's URL, or off ($SUBLEVELS_TXWTF)")
+    p.add_argument("--txwtf-listen", default=os.environ.get("SUBLEVELS_TXWTF_LISTEN") or None,
+                   metavar="ADDR:PORT",
+                   help=f"where an embedded TX.WTF listens ($SUBLEVELS_TXWTF_LISTEN, default "
+                        f"{txwtf.DEFAULT_LISTEN})")
     p.add_argument("--version", action="version", version=f"sublevels {__version__}")
     args = p.parse_args(argv)
-    for flag in ("http_listen", "nmdc_listen", "nmdcs_listen"):
+    try:
+        txwtf.plan(args.txwtf, args.txwtf_listen)
+    except ValueError as e:
+        p.error(str(e))
+    for flag in ("http_listen", "nmdc_listen", "nmdcs_listen", "txwtf_listen"):
         value = getattr(args, flag)
         if value is not None and value != "off":
             try:
@@ -111,13 +124,15 @@ def hub_config(args: argparse.Namespace) -> HubConfig:
     return cfg
 
 
-def serve(server: Server, http_listen: str = DEFAULT_HTTP) -> int:
+def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | None = "off",
+          txwtf_listen: str | None = None) -> int:
     """Serve until the host stops; returns its exit status."""
-    if http_listen != "off":
-        from pycvc.ariadne import serve_asgi
+    from pycvc.ariadne import serve_asgi
 
+    if http_listen != "off":
         h, p = split_address(http_listen)
         serve_asgi(server.app, host=h, port=p)
+    server.service.txwtf = txwtf.start(txwtf_mode, txwtf_listen, serve_asgi).as_tree()
     host = server.host
     listeners = None
     if not getattr(host, "checking", False):  # arisrvx check binds nothing
@@ -142,7 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not logging.getLogger().handlers:  # arisrvx sets its own; plain python gets one like it
         logging.basicConfig(level=logging.INFO, format="[sublevels] %(name)s: %(levelname)s: "
                             "%(message)s")
-    return serve(build(config=hub_config(args)), args.http_listen)
+    return serve(build(config=hub_config(args)), args.http_listen, args.txwtf, args.txwtf_listen)
 
 
 if __name__ == "__main__":

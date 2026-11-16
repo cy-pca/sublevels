@@ -17,6 +17,7 @@ DEFAULT_RULES = ("1. Be civil.",
 @dataclass(frozen=True)
 class HubConfig:
     hub_id: str = "main"  # its node under sublevels.hubs
+    room: str = "standup"  # the conference room this hub's users belong to (the relay's --room)
     name: str = "sublevels"
     topic: str = ""
     bot_nick: str = "sublevels"
@@ -59,7 +60,7 @@ class HubConfig:
                 "SUBLEVELS_TLS_CERT": "tls_cert", "SUBLEVELS_TLS_KEY": "tls_key",
                 "SUBLEVELS_NMDCS_ADDRESS": "nmdcs_address",
                 "SUBLEVELS_IDENTITY_SALT": "identity_salt",
-                "SUBLEVELS_NMDC_CAPTURE_DIR": "capture_dir"}
+                "SUBLEVELS_NMDC_CAPTURE_DIR": "capture_dir", "SUBLEVELS_ROOM": "room"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
