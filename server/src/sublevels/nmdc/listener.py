@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import ssl
+import time
 from dataclasses import dataclass, field
 
 from .hub import Hub, Session
@@ -31,12 +32,23 @@ class NmdcConnection(asyncio.Protocol):
         self.pending = 0
         self.closing = False
         self.loop = asyncio.get_running_loop()
+        self.capture = None  # a file, when the hub captures (HubConfig.capture_dir)
 
     # -- the hub's Conn ----------------------------------------------------------------------------
+
+    def _record(self, way: str, data: bytes) -> None:
+        """One capture line per message: seconds since connect, the direction, and the bytes as
+        Python escapes them (so \\x05 and the code page's high bytes stay visible)."""
+        t = time.monotonic() - self.t0
+        for m in data.split(b"|")[:-1] if data.endswith(b"|") else data.split(b"|"):
+            self.capture.write(f"{t:9.3f} {way} {(m + b'|')!r}\n")
+        self.capture.flush()
 
     def write(self, data: bytes) -> None:
         if self.closing or self.transport is None:
             return
+        if self.capture is not None:
+            self._record(">", data)
         if not self.out:
             self.loop.call_soon(self.flush)
         self.out.append(data)
@@ -75,6 +87,14 @@ class NmdcConnection(asyncio.Protocol):
     def connection_made(self, transport) -> None:
         self.transport = transport
         peer = transport.get_extra_info("peername") or ("0.0.0.0", 0)
+        self.t0 = time.monotonic()
+        cap = self.hub.config.capture_dir
+        if cap:
+            os.makedirs(cap, exist_ok=True)
+            self.capture = open(os.path.join(cap, f"{self.hub._ids + 1:05d}-{self.protocol}.log"),
+                                "w", encoding="ascii", errors="backslashreplace")
+            self.capture.write(f"# {self.protocol} from {peer[0]}:{peer[1]} at "
+                               f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
         self.session = self.hub.connect(self, peer[0], peer[1], self.protocol, self.tls)
 
     def data_received(self, data: bytes) -> None:
@@ -93,7 +113,10 @@ class NmdcConnection(asyncio.Protocol):
             if end + 1 - start > self.hub.max_message(s):
                 self.hub.too_long(s)
                 return
-            self.hub.message(s, bytes(buf[start:end + 1]))
+            msg = bytes(buf[start:end + 1])
+            if self.capture is not None:
+                self.capture.write(f"{time.monotonic() - self.t0:9.3f} < {msg!r}\n")
+            self.hub.message(s, msg)
             start = end + 1
         if start:
             del buf[:start]
@@ -102,6 +125,11 @@ class NmdcConnection(asyncio.Protocol):
 
     def connection_lost(self, exc) -> None:
         self.closing = True
+        if self.capture is not None:
+            reason = self.session.close_reason if self.session is not None else ""
+            self.capture.write(f"# closed: {reason or exc or 'by the client'}\n")
+            self.capture.close()
+            self.capture = None
         if self.session is not None:
             self.hub.disconnect(self.session, f"connection lost ({exc})" if exc else
                                 "closed by the client")
@@ -194,7 +222,8 @@ async def start_listeners(hub: Hub, *, cert_check_every: float = 30.0) -> Listen
     out = Listeners()
     if cfg.nmdc_listen != "off":
         h, p = split_listen(cfg.nmdc_listen)
-        server = await loop.create_server(lambda: NmdcConnection(hub, "nmdc", False), h, p)
+        server = await loop.create_server(lambda: NmdcConnection(hub, "nmdc", False), h, p,
+                                          backlog=cfg.listen_backlog)
         out.servers.append(("nmdc", server))
     if cfg.nmdcs_listen != "off":
         if not (cfg.tls_cert and cfg.tls_key):
@@ -204,7 +233,7 @@ async def start_listeners(hub: Hub, *, cert_check_every: float = 30.0) -> Listen
             out.tls = TlsContext(cfg.tls_cert, cfg.tls_key)
             h, p = split_listen(cfg.nmdcs_listen)
             server = await loop.create_server(lambda: NmdcConnection(hub, "nmdcs", True), h, p,
-                                              ssl=out.tls.context)
+                                              ssl=out.tls.context, backlog=cfg.listen_backlog)
             out.servers.append(("nmdcs", server))
             out.watcher = loop.create_task(_watch_cert(out.tls, cert_check_every))
     for proto, host, port in out.addresses():

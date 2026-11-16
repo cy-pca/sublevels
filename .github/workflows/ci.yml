@@ -8,7 +8,9 @@ name: ci
 #           operator installs them. pytest on cvcpkg's python3.12 with pycvc beside it (the Host
 #           tests, `python -m sublevels.server` end to end, and the S7 ServerHarness tests: none may
 #           skip), then server/ci/smoke.sh: the service in arisrvx, its room-call export
-#           registered, /healthz, SIGTERM, a clean exit.
+#           registered, /healthz, NMDC and NMDCS logins, SIGTERM, a clean exit.
+#   interop-ncdc  ncdc (Ubuntu's package) as a black box against the hub (server/interop/).
+#   soak    6000 synthetic clients against the hub; memory, CPU and fan-out latency in the summary.
 #
 # GitHub-hosted runners only: this repository is public, and a pull request's workflows must
 # never reach the self-hosted runners on catx-03.
@@ -61,3 +63,61 @@ jobs:
         run: ~/sublevels-ci/deps/bin/python3.12 -m pytest -rs -p no:cacheprovider
       - name: arisrvx smoke run
         run: bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
+
+  interop-ncdc:
+    # ncdc as Ubuntu packages it, run as a black box (server/interop/ncdc_interop.py): three ncdc
+    # (active, NMDCS, passive) and an observer against the hub run alone, checking login, chat,
+    # private messages, search and $SR, and file-list transfers by $ConnectToMe and
+    # $RevConnectToMe. The hub's captures and the findings for spec/'s "To capture" items are kept.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ncdc and tmux (apt)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ncdc tmux
+          ncdc --version | head -1
+      - name: ncdc interop
+        run: python server/interop/ncdc_interop.py --out "$RUNNER_TEMP/interop"
+      - name: Findings
+        if: always()
+        run: cat "$RUNNER_TEMP/interop/findings.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-ncdc
+          path: ${{ runner.temp }}/interop
+          retention-days: 14
+
+  soak:
+    # 6000 synthetic clients (D7) against the hub run alone (server/interop/soak.py): every client
+    # must log in and stay connected. Memory per user, CPU and fan-out latency go to the summary.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Soak, 6000 users
+        run: |
+          ulimit -n 65536
+          python server/interop/soak.py --users 6000 --workers 3 --ramp 300 --chat 30 --out "$RUNNER_TEMP/soak"
+      - name: Results
+        if: always()
+        run: |
+          { echo '## Soak'; echo '```json'
+            python -c "import json,sys; r=json.load(open(sys.argv[1])); [r.pop(k, None) for k in ('samples',)]; print(json.dumps(r, indent=1))" "$RUNNER_TEMP/soak/soak.json"
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak
+          path: ${{ runner.temp }}/soak
+          retention-days: 14
