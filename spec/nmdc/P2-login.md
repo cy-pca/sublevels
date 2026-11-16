@@ -83,7 +83,9 @@ hub     the user list (§6), $HubTopic, the message of the day (§7)
   user's TX.WTF account issues for NMDC use. The hub checks it with TX.WTF and never stores it in
   clear. The TX.WTF side is specified in M2; until then the hub runs with no registered accounts.
 - **Accounts are optional** [D-9]. A user without an account logs in with any free, unreserved
-  nick, and is identified by their identity hash.
+  nick, and is identified by their client id: for an NMDC connection, the registry's fallback id
+  from its addresses (roadmap D9). Nicks are also checked against the registry's usernames, so a
+  native user's name is never available to an NMDC login.
 - **`SaltPass`** (`$GetPass <salt>|`, answered with a hash of password and salt [NMDC] §4.6.16)
   avoids the clear password, but needs the Tiger hash. It is deferred to M2.
 

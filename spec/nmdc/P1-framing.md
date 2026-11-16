@@ -116,7 +116,7 @@ The hub enforces these limits per connection. Each one is a hub setting; the def
 | Unsent output queued for a slow reader | 4 MiB | close |
 
 - "Close" means: the hub sends nothing further, closes the connection, and logs the reason with
-  the connection's identity hash [D-9].
+  the connection's client id [D-9].
 - Rate limits on particular commands (chat, search, connection requests, `$MyINFO`) belong to
   their own items.
 
