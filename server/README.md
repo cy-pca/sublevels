@@ -56,5 +56,5 @@ cd server && ../deps/bin/python3.12 -m pytest
 The service and API tests need only fastapi, httpx and pytest. The Host tests need pycvc, and the
 harness tests libcvc S7's `pycvc.ariadne.testing`; without them they skip, unless
 `SUBLEVELS_REQUIRE_PYCVC=1` or `SUBLEVELS_REQUIRE_HARNESS=1` makes that a failure. Room-call needs
-libcvc S2: on an older host (3.7.13) the service serves HTTP and publishes, and registers no
-exports.
+libcvc S2: on an older host (arisrvx 3.7.13+cvc.2) the service serves HTTP and publishes, and
+registers no exports.

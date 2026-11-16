@@ -2,8 +2,8 @@
 
 Each export is a thin wrapper over the service, as the HTTP routes are. They are registered with
 ``pycvc.ariadne.export``, which needs libcvc S2 (transfix/libcvc#1122). A host whose
-``pycvc.ariadne`` predates it (libcvc 3.7.13 and older) serves HTTP and the published subtree but
-takes no calls; :func:`register` then registers nothing and says so.
+``pycvc.ariadne`` predates it (arisrvx and pycvc 3.7.13+cvc.2 and older) serves HTTP and the
+published subtree but takes no calls; :func:`register` then registers nothing and says so.
 """
 
 from __future__ import annotations
