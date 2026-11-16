@@ -164,3 +164,22 @@ def test_certificate_reload(tmp_path):
     open(cert, "w").write("not a certificate")
     os.utime(cert, ns=(3, 4))
     assert not tls.reload_if_changed()  # a bad file keeps the old certificate
+
+
+def test_capture_records_both_ways(tmp_path):
+    async def go():
+        hub, listeners, ports = await hub_on(plain(capture_dir=str(tmp_path)))
+        c = Client("cap")
+        await c.connect("127.0.0.1", ports["nmdc"])
+        await c.login()
+        await c.close()
+        await asyncio.sleep(0.2)
+        await listeners.close(hub)
+
+    run(go())
+    (log,) = tmp_path.glob("*-nmdc.log")
+    text = log.read_text()
+    assert text.startswith("# nmdc from 127.0.0.1:")
+    assert "> b'$Lock EXTENDEDPROTOCOL_sublevels_" in text
+    assert "< b'$ValidateNick cap|'" in text
+    assert "# closed:" in text

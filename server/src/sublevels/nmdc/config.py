@@ -37,6 +37,12 @@ class HubConfig:
     tls_key: str = ""
     identity_salt: str = ""  # [D-9]: "" picks a random one per run
     publish_interval: float = 1.0  # seconds between writes of the sublevels.hubs subtree
+    # The listen backlog: connections waiting for the loop to accept them. A burst of logins at
+    # 6000+ users [D-7] overflows asyncio's default of 100.
+    listen_backlog: int = 1024
+    # Interop runs: write each connection's messages, both ways, to <capture_dir>/<id>-<protocol>
+    # .log. It records what clients send in clear, passwords included: for test hubs only.
+    capture_dir: str = ""
     limits: Limits = field(default_factory=Limits)
 
     def with_(self, **kw) -> "HubConfig":
@@ -52,7 +58,8 @@ class HubConfig:
                 "SUBLEVELS_NMDC_LISTEN": "nmdc_listen", "SUBLEVELS_NMDCS_LISTEN": "nmdcs_listen",
                 "SUBLEVELS_TLS_CERT": "tls_cert", "SUBLEVELS_TLS_KEY": "tls_key",
                 "SUBLEVELS_NMDCS_ADDRESS": "nmdcs_address",
-                "SUBLEVELS_IDENTITY_SALT": "identity_salt"}
+                "SUBLEVELS_IDENTITY_SALT": "identity_salt",
+                "SUBLEVELS_NMDC_CAPTURE_DIR": "capture_dir"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
