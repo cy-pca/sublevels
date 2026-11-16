@@ -4,7 +4,8 @@
 #
 #   1. arisrvx --python server/main.py --doc server/share/sublevels/server.ari, its relay on
 #      loopback ports, the HTTP API on another (SUBLEVELS_HTTP_LISTEN);
-#   2. GET /healthz answers with the package's version;
+#   2. GET /healthz answers with the package's version, and, when this arisrvx has room-call
+#      (libcvc S2), the log says sublevels.ping is exported;
 #   3. SIGTERM: arisrvx exits 0 within the shutdown timeout, with no traceback in its log.
 #
 # The log is printed at the end either way.
@@ -72,4 +73,8 @@ pid=
 [[ "$rc" -eq 0 ]] || fail "arisrvx exited $rc after SIGTERM"
 if grep -q "Traceback" "$log"; then fail "a traceback in arisrvx's log"; fi
 grep -q "publishing sublevels.server" "$log" || fail "the service did not report publishing"
+# A host with room-call (libcvc S2) must have taken the export.
+if "$arisrvx" python -c 'from pycvc.ariadne import export' 2>/dev/null; then
+  grep -q "room-call: sublevels.ping" "$log" || fail "this arisrvx has room-call, but sublevels.ping was not exported"
+fi
 echo "smoke: OK (exit 0 after SIGTERM)"
