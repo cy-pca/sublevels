@@ -1,0 +1,55 @@
+schema_version: 1
+recipe:
+  name: sublevels
+  upstream_version: "0.1.0"
+  cvc_revision: 1
+  maintainer: "cvcpkg group"
+  maintainer_email: "info@cvcpkg.org"
+  maintainer_url: "https://cvcpkg.org"
+  homepage: https://github.com/cy-pca/sublevels
+  license: MIT
+  tags: [server, direct-connect, nmdc, conference, python, arisrvx]
+  description: >-
+    sublevels, a Direct Connect hub for the Ariadne stack, run as one arisrvx process: the
+    conference relay the Ariadne rooms join (cyprty's settings by default), an NMDC and NMDCS hub
+    that DC++, AirDC++, EiskaltDC++ and ncdc use unchanged, its HTTP API, and TX.WTF in the same
+    process when txwtf is installed (`--txwtf URL` for a separate one, `--no-txwtf` for none).
+    `sublevels` starts it; `sublevels help` lists the options.
+
+# Python and documents, nothing compiled, so one build serves every platform arisrvx runs on. The
+# launcher runs the arisrvx beside it in the prefix (the runtime dependency), else arisrvx on PATH.
+#
+# Published to cvcpkg.org under the cy-pca organisation by .github/workflows/publish-sublevels.yml,
+# started by hand on main: bump upstream_version (cvc_revision for a packaging-only change), merge,
+# run it. arisrvx and pycvc 4.0.0 are the first with room-call and the S7 harness the server uses.
+source:
+  # This repository: recipes/sublevels/../.. is its root.
+  type: vendored
+  path: ../..
+
+patches: []
+
+depends:
+  build: []
+  runtime:
+    - name: arisrvx
+      version: ">=4.0.0"
+    - name: pycvc-cp312
+      version: ">=4.0.0"
+    - name: fastapi-cp312
+    - name: uvicorn-cp312
+    - name: python312
+  host_tools: []
+
+build:
+  build_type_independent: true
+  matrix:
+    - platform: any
+      script: build.sh
+
+package:
+  files:
+    - bin/sublevels
+    - lib/python3.12/site-packages/sublevels/
+    - share/sublevels/
+    - share/doc/sublevels/

@@ -36,6 +36,7 @@ class Service:
         self.status = "starting"
         self.hub = None  # the NMDC hub (sublevels.nmdc.Hub), once the server makes it
         self.admin_token = ""  # the admin API's bearer token; "" turns the admin API off
+        self.txwtf = {"mode": "off", "url": ""}  # where TX.WTF is (sublevels.txwtf)
 
     @property
     def server_path(self) -> str:
@@ -50,11 +51,13 @@ class Service:
             "version": self.version,
             "started": _iso(self.started),
             "status": self.status,
+            "txwtf": dict(self.txwtf),
         }
 
     def health(self) -> dict:
         """The answer to ``GET /healthz``."""
-        return {"status": "ok", "version": self.version, "uptime": round(self.uptime(), 3)}
+        return {"status": "ok", "version": self.version, "uptime": round(self.uptime(), 3),
+                "txwtf": self.txwtf["mode"]}
 
     def public_stats(self) -> dict:
         """What anyone may read: the live user count (D14), and the NMDCS address and keyprint."""

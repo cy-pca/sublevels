@@ -20,7 +20,9 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 | `interop/airdcpp_interop.py` | The AirDC++ web client as a black box, through its documented HTTP API |
 | `interop/transfers.py` | ncdc and AirDC++ download each other's files through the hub, over NMDC or NMDCS |
 | `interop/soak.py` | Synthetic clients toward 6000+ (D7): memory, CPU and fan-out latency |
-| `ci/install.sh`, `ci/smoke.sh` | Install the stack from cvcpkg; run the arisrvx smoke test |
+| `bin/sublevels` | The `sublevels` command: the relay, the hub, the HTTP API and TX.WTF in one arisrvx |
+| `src/sublevels/txwtf_service.py` | TX.WTF in this process, a separate instance, or none |
+| `ci/install.sh`, `ci/smoke.sh`, `ci/smoke-package.sh` | Install the stack from cvcpkg; the arisrvx smoke run; the installed command's |
 
 ## What it publishes and exports
 
@@ -37,26 +39,34 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 
 ## Running it
 
-Install the stack from cvcpkg (`ci/install.sh ROOT` pins what CI uses):
+From cvcpkg (the `sublevels` package, in the cy-pca organisation, brings arisrvx and pycvc with it):
 
 ```bash
-cvcpkg install arisrvx pycvc-cp312 fastapi-cp312 uvicorn-cp312 --prefix deps
+cvcpkg install sublevels --prefix ~/sublevels
+~/sublevels/bin/sublevels --tls-cert hub.crt --tls-key hub.key --nmdcs-address nmdcs://hub.example:4111
 ```
 
-In arisrvx, which runs a script by path and passes it no arguments:
+`sublevels` runs one arisrvx process:
+
+- **The conference relay**, with cyprty's settings unless given: room `standup`, state plane
+  `0.0.0.0:7700`, media `0.0.0.0:7701`, WebSocket `0.0.0.0:7702`.
+- **The NMDC hub** on `0.0.0.0:411`. Binding port 411 needs the privilege, so `--nmdc` can move it.
+- **NMDCS** on `0.0.0.0:4111` when a certificate is given. The keyprint is published at `/stats`.
+- **The HTTP API** on `127.0.0.1:8411`.
+- **TX.WTF**, in the same process when `txwtf` is installed. `--txwtf URL` names a separate
+  instance, and `--no-txwtf` turns it off.
+
+`sublevels help` lists every option. `sublevels check` imports the program and binds nothing.
+
+From a checkout, the same launcher works as `server/bin/sublevels` with an arisrvx on PATH (for
+example `cvcpkg install arisrvx pycvc-cp312 fastapi-cp312 uvicorn-cp312 --prefix deps`;
+`ci/install.sh ROOT` pins what CI uses). Under plain python, with pycvc beside it, the server runs
+without the relay:
 
 ```bash
-SUBLEVELS_HTTP_LISTEN=127.0.0.1:8411 deps/bin/arisrvx --python server/main.py --doc server/share/sublevels/server.ari
+cd server && PYTHONPATH=src ../deps/bin/python3.12 -m sublevels.server --http-listen 127.0.0.1:8411 \
+  --nmdc-listen 127.0.0.1:4110 --nmdcs-listen off --txwtf off
 ```
-
-Under plain python, with pycvc beside it:
-
-```bash
-cd server && PYTHONPATH=src ../deps/bin/python3.12 -m sublevels.server --http-listen 127.0.0.1:8411
-```
-
-The HTTP address is `--http-listen`, else `$SUBLEVELS_HTTP_LISTEN`, else `127.0.0.1:8411`; `off`
-serves none. SIGTERM or SIGINT stops it.
 
 ## Tests
 

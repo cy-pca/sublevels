@@ -16,6 +16,16 @@ public specifications as Ariadne documents and an `arisrvx` service.
 This is a clean-room implementation. It contains no code from eiskaltdcpp, DC++, verlihub or
 any other Direct Connect implementation. See [CLEANROOM.md](CLEANROOM.md).
 
+## Install
+
+```bash
+cvcpkg install sublevels
+sublevels help
+```
+
+`sublevels` runs the conference relay, the NMDC/NMDCS hub, its HTTP API and (by default) TX.WTF
+in one arisrvx process. See [server/README.md](server/README.md).
+
 ## Layout
 
 | Path | What |
@@ -23,6 +33,7 @@ any other Direct Connect implementation. See [CLEANROOM.md](CLEANROOM.md).
 | [`spec/`](spec/README.md) | The protocol spec that implementers work from, with sources |
 | [`server/`](server/README.md) | The `sublevels` Python package, its arisrvx launcher and server document, and their tests |
 | `client/` | The client component set (planned) |
+| `recipes/` | cvcpkg recipes, published under the cy-pca organisation |
 | `docs/` | [Roadmap](docs/ROADMAP.md) and design notes |
 
 ## License

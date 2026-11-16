@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sublevels"
-version = "0.0.1"
+version = "0.1.0"
 description = "A Direct Connect hub for the Ariadne stack, run as an arisrvx service"
 readme = "README.md"
 license = { text = "MIT" }

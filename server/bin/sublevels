@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# sublevels: run the sublevels server, one arisrvx process holding
+#   - the conference relay (the Ariadne rooms cyprty and nicotina join), with cyprty's settings,
+#   - the NMDC hub (NMDC, and NMDCS when a certificate is given),
+#   - the HTTP API, and
+#   - TX.WTF, in the same process by default (--txwtf URL for a separate one, --no-txwtf for none).
+#
+#   sublevels [serve] [options] [-- arisrvx flags...]
+#   sublevels check   [options]        arisrvx check: imports the program, binds nothing
+#   sublevels version | help
+#
+# It runs the arisrvx beside it in the prefix (cvcpkg install sublevels), else arisrvx on PATH.
+set -euo pipefail
+
+here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+prefix=$(dirname "$here")
+if [[ -f "$prefix/share/sublevels/main.py" ]]; then        # installed
+  main="$prefix/share/sublevels/main.py"
+  doc="$prefix/share/sublevels/server.ari"
+else                                                      # a checkout: server/bin/sublevels
+  main="$prefix/main.py"
+  doc="$prefix/share/sublevels/server.ari"
+fi
+if [[ -x "$here/arisrvx" ]]; then
+  arisrvx="$here/arisrvx"
+else
+  arisrvx=$(command -v arisrvx || true)
+fi
+
+usage() {
+  cat <<'EOF'
+usage: sublevels [serve|check] [options] [-- arisrvx flags...]
+       sublevels version | help
+
+The conference relay (cyprty's settings unless given):
+  --room NAME              the conference room (default standup)
+  --state-listen ADDR:PORT gRPC state plane (default 0.0.0.0:7700)
+  --media-listen ADDR:PORT gRPC media plane (default 0.0.0.0:7701)
+  --ws-listen ADDR:PORT    WebSocket plane for browsers (default 0.0.0.0:7702)
+  --room-token-file FILE   the room token (default: an open room)
+  --relay-tls              serve the gRPC planes over TLS with --tls-cert/--tls-key too
+
+The NMDC hub:
+  --nmdc ADDR:PORT|off     plain NMDC (default 0.0.0.0:411; binding 411 needs the privilege)
+  --nmdcs ADDR:PORT|off    NMDCS, TLS (default 0.0.0.0:4111; needs --tls-cert and --tls-key)
+  --tls-cert FILE          the certificate (PEM) for NMDCS
+  --tls-key FILE           its key
+  --nmdcs-address URL      the address clients are given (nmdcs://host:port; the keyprint is added)
+  --tls-required           refuse plain NMDC, with $ForceMove to the NMDCS address
+  --hub-name NAME          the hub's name (default sublevels)
+  --topic TEXT             the hub's topic
+
+The HTTP API and TX.WTF:
+  --http ADDR:PORT|off     the hub's HTTP API (default 127.0.0.1:8411)
+  --admin-token-file FILE  bearer token for GET /admin/stats (default: the admin API is off)
+  --txwtf embedded|URL|off TX.WTF in this process (default: embedded when txwtf is installed),
+                           a separate instance's URL, or off
+  --txwtf-listen ADDR:PORT where an embedded TX.WTF listens (default 127.0.0.1:8086)
+  --no-txwtf               the same as --txwtf off
+
+Every other SUBLEVELS_* setting (src/sublevels/nmdc/config.py) is read from the environment.
+Flags after -- go to arisrvx unchanged (arisrvx ignores flags it does not know).
+EOF
+}
+
+cmd=serve
+case "${1:-}" in
+  serve|check) cmd=$1; shift ;;
+  version|--version|-V)
+    py=(python3); [[ -n "$arisrvx" ]] && py=("$arisrvx" python)
+    exec "${py[@]}" -c "import sys; sys.path.insert(0, '$prefix/src')
+import sublevels; print('sublevels', sublevels.__version__)"
+    ;;
+  help|--help|-h) usage; exit 0 ;;
+esac
+
+room=standup state=0.0.0.0:7700 media=0.0.0.0:7701 ws=0.0.0.0:7702
+token_file="" relay_tls="" cert="" key=""
+envs=()
+extra=()
+need() { [[ $# -ge 2 && -n "$2" ]] || { echo "sublevels: $1 needs a value" >&2; exit 2; }; }
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --room) need "$@"; room=$2; shift 2 ;;
+    --state-listen) need "$@"; state=$2; shift 2 ;;
+    --media-listen) need "$@"; media=$2; shift 2 ;;
+    --ws-listen) need "$@"; ws=$2; shift 2 ;;
+    --room-token-file) need "$@"; token_file=$2; shift 2 ;;
+    --relay-tls) relay_tls=1; shift ;;
+    --nmdc) need "$@"; envs+=("SUBLEVELS_NMDC_LISTEN=$2"); shift 2 ;;
+    --nmdcs) need "$@"; envs+=("SUBLEVELS_NMDCS_LISTEN=$2"); shift 2 ;;
+    --tls-cert) need "$@"; cert=$2; envs+=("SUBLEVELS_TLS_CERT=$2"); shift 2 ;;
+    --tls-key) need "$@"; key=$2; envs+=("SUBLEVELS_TLS_KEY=$2"); shift 2 ;;
+    --nmdcs-address) need "$@"; envs+=("SUBLEVELS_NMDCS_ADDRESS=$2"); shift 2 ;;
+    --tls-required) envs+=("SUBLEVELS_TLS_REQUIRED=1"); shift ;;
+    --hub-name) need "$@"; envs+=("SUBLEVELS_HUB_NAME=$2"); shift 2 ;;
+    --topic) need "$@"; envs+=("SUBLEVELS_HUB_TOPIC=$2"); shift 2 ;;
+    --http) need "$@"; envs+=("SUBLEVELS_HTTP_LISTEN=$2"); shift 2 ;;
+    --admin-token-file) need "$@"; envs+=("SUBLEVELS_ADMIN_TOKEN_FILE=$2"); shift 2 ;;
+    --txwtf) need "$@"; envs+=("SUBLEVELS_TXWTF=$2"); shift 2 ;;
+    --txwtf-listen) need "$@"; envs+=("SUBLEVELS_TXWTF_LISTEN=$2"); shift 2 ;;
+    --no-txwtf) envs+=("SUBLEVELS_TXWTF=off"); shift ;;
+    --) shift; extra+=("$@"); break ;;
+    *) echo "sublevels: unknown option $1 (see sublevels help)" >&2; exit 2 ;;
+  esac
+done
+
+[[ -n "$arisrvx" ]] || { echo "sublevels: no arisrvx (cvcpkg install arisrvx)" >&2; exit 1; }
+relay=(--room "$room" --state-listen "$state" --media-listen "$media" --ws-listen "$ws")
+[[ -n "$token_file" ]] && relay+=(--room-token-file "$token_file")
+if [[ -n "$relay_tls" ]]; then
+  [[ -n "$cert" && -n "$key" ]] || { echo "sublevels: --relay-tls needs --tls-cert and --tls-key" >&2; exit 2; }
+  relay+=(--tls-cert "$cert" --tls-key "$key")
+fi
+envs+=("SUBLEVELS_ROOM=$room")
+
+if [[ "$cmd" == check ]]; then
+  exec env "${envs[@]}" "$arisrvx" check "$main" --doc "$doc" "${relay[@]}" "${extra[@]}"
+fi
+exec env "${envs[@]}" "$arisrvx" --python "$main" --doc "$doc" "${relay[@]}" "${extra[@]}"

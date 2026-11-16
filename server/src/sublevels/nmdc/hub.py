@@ -857,6 +857,7 @@ class Hub:
         self.tree.set_tree(self.tree_path, {
             "name": self.config.name, "topic": self.config.topic, "bot": self.config.bot_nick,
             "nmdcs": {"address": self.nmdcs_url(), "keyprint": self.keyprint},
+            "room": self.config.room,
             "users": {"count": len(self.users), "list": users},
         })
 

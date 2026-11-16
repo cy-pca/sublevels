@@ -16,4 +16,8 @@ if os.path.isdir(_src) and _src not in sys.path:
 
 from sublevels.server import main  # noqa: E402
 
-raise SystemExit(main([]))
+# A non-zero status stops the program with it. On success the program just ends: arisrvx then
+# reports its status, and `arisrvx check` writes its report (a SystemExit would skip the report).
+status = main([])
+if status:
+    raise SystemExit(status)

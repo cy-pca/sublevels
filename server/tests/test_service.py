@@ -27,14 +27,14 @@ class Tree:
 def test_server_info():
     s = Service(clock=Clock())
     assert s.server_info() == {"version": __version__, "started": "2027-01-15T08:00:00+00:00",
-                               "status": "starting"}
+                               "status": "starting", "txwtf": {"mode": "off", "url": ""}}
 
 
 def test_health_reports_version_and_uptime():
     clock = Clock()
     s = Service(clock=clock)
     clock.t += 2.5
-    assert s.health() == {"status": "ok", "version": __version__, "uptime": 2.5}
+    assert s.health() == {"status": "ok", "version": __version__, "uptime": 2.5, "txwtf": "off"}
 
 
 def test_uptime_never_negative():

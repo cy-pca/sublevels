@@ -5,7 +5,7 @@ The service layer is :mod:`sublevels.service`. Its front ends are the HTTP API
 listener (:mod:`sublevels.nmdc`). :mod:`sublevels.server` runs them in one process.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 # The published namespace: the state subtree the service writes and native clients mirror. The
 # server document (server/share/sublevels/server.ari) publishes the same name.
