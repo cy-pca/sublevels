@@ -1,0 +1,102 @@
+schema_version: 1
+recipe:
+  name: eiskaltdcpp
+  upstream_version: "2.6.0"
+  cvc_revision: 1
+  maintainer: "cy-pca"
+  maintainer_url: "https://github.com/cy-pca/sublevels"
+  homepage: https://github.com/transfix/eiskaltdcpp
+  # COPYING: GPL-3.0-or-later, with the EiskaltDC++ developers' exception permitting linking with
+  # OpenSSL. The dcpp core it derives from (DC++) is GPL-2.0-or-later. cvcpkg copies COPYING and
+  # LICENSE to share/licenses/eiskaltdcpp/.
+  license: GPL-3.0-or-later
+  tags: [networking, p2p, direct-connect, daemon, libraries]
+  description: >-
+    EiskaltDC++ 2.6.0 from the transfix fork, a Direct Connect (NMDC and ADC) client: the
+    headless eiskaltdcpp-daemon, controlled over JSON-RPC, and the libeiskaltdcpp core library
+    with its development headers (what the eiskaltdcpp-py bindings build against). Built from
+    source with Lua scripting, DHT, UPnP (miniupnpc), PCRE2, IDN2 and the fork's NMDCpb
+    (protobuf) extension. No GUI. Linux.
+
+# Upstream source: transfix/eiskaltdcpp, a fork of eiskaltdcpp/eiskaltdcpp. Tag v2.6.0, the
+# fork's latest release and the head of its master branch (e3e4a9f, 2026-07-03); eiskaltdcpp-py
+# v2.6.0 pins the same commit. The fork's other branches (wip/*, nmdcpb-*, qt6-migration,
+# fix/clean-shutdown) are work in progress or merged, and are not packaged.
+source:
+  type: tarball
+  url: https://github.com/transfix/eiskaltdcpp/archive/e3e4a9f37a191b1b11c1c621ba61b17e6bf982e9.tar.gz
+  sha256: "5db2f52c4b36919af11b382b8cf3801801f15328f33ed575e43d31af560ed12c"
+  strip_components: 1
+
+patches: []
+
+depends:
+  build:
+    - cmake
+    - ninja
+  runtime:
+    - name: openssl
+    - name: zlib
+    - name: bzip2
+    - name: protobuf
+    - name: abseil
+    - name: pcre2
+    - name: idn2
+    - name: lua
+    - name: miniupnpc
+  host_tools: []
+
+build:
+  matrix:
+    - platform: linux
+      script: build.sh
+
+package:
+  files:
+    - bin/eiskaltdcpp-daemon
+    - lib/libeiskaltdcpp*
+    - lib/pkgconfig/eiskaltdcpp.pc
+    - include/eiskaltdcpp/dcpp/
+    - include/eiskaltdcpp/extra/
+    - include/eiskaltdcpp/dht/
+    - include/eiskaltdcpp/proto/
+    - share/eiskaltdcpp/build-flags.txt
+    - share/locale/
+    - share/man/man1/eiskaltdcpp-daemon.1
+    - share/licenses/eiskaltdcpp/
+
+test:
+  script: test.sh
+
+abi:
+  cxx_std: 20
+
+toolchain:
+  note: >-
+    GCC 12 or newer (C++20), and gettext's msgfmt on PATH: the build compiles the core's message
+    catalogues into share/locale/ (Ubuntu's gettext package; glibc provides libintl).
+
+notes:
+  - title: "ABI flags the headers depend on"
+    description: >-
+      Some public classes change layout with build flags: LUA_SCRIPT, WITH_DHT and WITH_NMDCPB
+      are all on here. A consumer must compile with all three defined, and with this prefix's
+      include/eiskaltdcpp (for proto/nmdcpb.pb.h) and include (protobuf, abseil) on its include
+      path, or it will read the wrong offsets. share/eiskaltdcpp/build-flags.txt records them;
+      eiskaltdcpp-py's recipe reads it.
+  - title: "Data directory is compiled in"
+    description: >-
+      The core looks for its data directory (bundled Lua scripts, a GeoIP CSV) at a path fixed at
+      build time, which points into the build machine once the bundle is installed elsewhere.
+      The daemon runs without it, and this build installs neither (the example scripts install
+      with the GUI only). Making that path relative to the library is a change for the fork.
+  - title: "The daemon crashes while stopping"
+    description: >-
+      v2.6.0's eiskaltdcpp-daemon frees its JSON-RPC server while the server's poll thread is
+      still running, so a stop (daemon.stop or SIGTERM) ends in SIGSEGV after the shutdown
+      itself has run. test.sh tolerates that one case and says so. The fix belongs in
+      transfix/eiskaltdcpp; the recipe moves to the release that has it.
+  - title: "No GUI yet"
+    description: >-
+      The fork's Qt 6 GUI (eiskaltdcpp-qt) is not built. qt6 and qtmultimedia are on cvcpkg, so
+      it can be a separate recipe (eiskaltdcpp-qt), keeping Qt out of the daemon's closure.
