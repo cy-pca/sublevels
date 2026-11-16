@@ -1,11 +1,14 @@
 name: recipes-clients
 
-# Builds the Direct Connect client recipes from source, as publish-clients.yml does, and throws the
-# result away: airdcpp-webclient, eiskaltdcpp and the eiskaltdcpp-py columns (cp311, cp312,
-# cp313). `cvcpkg pack` builds each one into the prefix, runs its recipes/<name>/test.sh on the
-# staged tree (the daemon started from it, its API or JSON-RPC answered; the bindings imported and
-# the core started), checks its globs, relocation and glibc floor, and archives it. Nothing is
-# published or uploaded.
+# Builds the Direct Connect client recipe airdcpp-webclient from source, as publish-clients.yml
+# does, and throws the result away. `cvcpkg pack` builds it into the prefix, runs its
+# recipes/airdcpp-webclient/test.sh on the staged tree (the daemon started from it, its API
+# answered), checks its globs, relocation and glibc floor, and archives it. Nothing is published
+# or uploaded.
+#
+# The eiskaltdcpp recipes live beside their sources: recipes/eiskaltdcpp in transfix/eiskaltdcpp
+# and the eiskaltdcpp-py columns in transfix/eiskaltdcpp-py, each with its own CI and publish
+# workflow.
 #
 # ubuntu-22.04 with GCC 12: cvcpkg's linux bundles must start on glibc 2.35, so `cvcpkg pack`
 # refuses one built on a newer glibc (24.04 has 2.39), and AirDC++ needs GCC 12 or newer for C++20.
@@ -13,8 +16,7 @@ name: recipes-clients
 # leveldb and websocketpp, which AirDC++ needs, are not on cvcpkg.org until cy-pca/cvcpkg#623
 # merges and its recipes are built there. Until then install-deps builds them from that pull
 # request's recipes (CVCPKG_DEPS_REF), overlaid with --recipes-dir; once cvcpkg.org has them the
-# overlay is unused and can go. eiskaltdcpp is not on cvcpkg.org either until publish-clients.yml
-# first runs, so each eiskaltdcpp-py column builds it from recipes/eiskaltdcpp the same way.
+# overlay is unused and can go.
 #
 # GitHub-hosted runners only: this repository is public, and a pull request's workflows must
 # never reach the self-hosted runners on catx-03.
@@ -23,15 +25,11 @@ on:
   pull_request:
     paths:
       - 'recipes/airdcpp-webclient/**'
-      - 'recipes/eiskaltdcpp/**'
-      - 'recipes/eiskaltdcpp-py*/**'
       - '.github/workflows/recipes-clients.yml'
   push:
     branches: [main]
     paths:
       - 'recipes/airdcpp-webclient/**'
-      - 'recipes/eiskaltdcpp/**'
-      - 'recipes/eiskaltdcpp-py*/**'
       - '.github/workflows/recipes-clients.yml'
   workflow_dispatch:
 
@@ -82,54 +80,3 @@ jobs:
             --prefix "$RUNNER_TEMP/prefix" --config release --link shared --output-dir dist
           ls -l dist/
           ls dist/airdcpp-webclient-2.14.0+cvc.*-linux-x86_64-release-shared.tar.gz
-
-  eiskaltdcpp:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-cvcpkg
-      - name: msgfmt (the build compiles its message catalogues)
-        run: command -v msgfmt || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends gettext; }
-      - name: Dependencies (cvcpkg.org)
-        run: |
-          set -euo pipefail
-          "$CXX" --version | head -1
-          cvcpkg install-deps eiskaltdcpp --recipes-dir recipes \
-            --prefix "$RUNNER_TEMP/prefix" --config release --link shared \
-            --no-fallback-to-source --include-host-tools
-      - name: Build, test and pack
-        run: |
-          set -euo pipefail
-          cvcpkg pack eiskaltdcpp --local --recipes-dir recipes \
-            --prefix "$RUNNER_TEMP/prefix" --config release --link shared --output-dir dist
-          ls -l dist/
-          ls dist/eiskaltdcpp-2.6.0+cvc.*-linux-x86_64-release-shared.tar.gz
-
-  eiskaltdcpp-py:
-    name: eiskaltdcpp-py-${{ matrix.abi }}
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        abi: [cp311, cp312, cp313]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-cvcpkg
-      - name: msgfmt (eiskaltdcpp's build compiles its message catalogues)
-        run: command -v msgfmt || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends gettext; }
-      # One prefix per column: the columns' build backends occupy the same slots.
-      - name: Dependencies (cvcpkg.org; eiskaltdcpp from recipes/ until published)
-        run: |
-          set -euo pipefail
-          cvcpkg install-deps "eiskaltdcpp-py-${{ matrix.abi }}" --recipes-dir recipes \
-            --prefix "$RUNNER_TEMP/prefix" --config release --link shared \
-            --fallback-to-source --include-host-tools
-      - name: Build, test and pack
-        run: |
-          set -euo pipefail
-          cvcpkg pack "eiskaltdcpp-py-${{ matrix.abi }}" --local --recipes-dir recipes \
-            --prefix "$RUNNER_TEMP/prefix" --config release --link shared --output-dir dist
-          ls -l dist/
-          ls "dist/eiskaltdcpp-py-${{ matrix.abi }}-2.6.0+cvc."*-linux-x86_64-release-shared.tar.gz
