@@ -3,17 +3,13 @@
 # into ROOT/deps, as an operator installs them. ROOT/deps/bin/python3.12 is cvcpkg's CPython, the
 # one arisrvx embeds, and runs the tests with pycvc beside it.
 #
-# The pins: libcvc 4.0.0 is tagged but not yet on cvcpkg for linux x86_64 (2026-11-16). Until it
-# is, the set is arisrvx and pycvc-cp312 3.7.13+cvc.3, republished 2026-11-15 with libcvc S2-S7
-# (export/room-call, authenticate, read scope, ServerHarness), on libcvc 3.7.13+cvc.4, which they
-# were built against. Every pin matters:
-#   - arisrvx and pycvc-cp312 depend on libcvc with no version, so unpinned they resolve to libcvc
-#     4.0.0 (libcvc.so.4) once it is published, and fail to load;
-#   - their 3.7.13+cvc.2 builds lack S2-S7 and do not load on libcvc 3.7.13+cvc.4 (cvc.4 dropped
-#     cvc::image::save(std::string) and cvc::ariadne::register_cvc_uri_handler).
-# On a box with an NVIDIA GPU the resolver takes libcvc-cuda instead, which these pins do not
-# override; GitHub's runners have none. When 4.0.0's arisrvx and pycvc-cp312 are published, set
-# LIBCVC=4.0.0 and the three builds to theirs.
+# The pins: libcvc 4.0.0, the first release on cvcpkg with libcvc S2-S7 (export/room-call,
+# authenticate, read scope, ServerHarness) in arisrvx and pycvc-cp312. libcvc is pinned to the build
+# arisrvx and pycvc-cp312 4.0.0+cvc.1 were built against (4.0.0+cvc.2, published 2026-11-16 01:02Z,
+# minutes before them; every libcvc symbol arisrvx imports is defined there). Every pin matters:
+# arisrvx and pycvc-cp312 depend on libcvc with no version, and a libcvc republished under the same
+# upstream version has dropped symbols before (3.7.13+cvc.4 broke arisrvx 3.7.13+cvc.2). Move all
+# three together.
 set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: $0 ROOT" >&2; exit 2; }
@@ -21,9 +17,9 @@ mkdir -p "$1"
 root=$(cd "$1" && pwd)
 deps=$root/deps
 
-LIBCVC=${LIBCVC:-3.7.13}
-LIBCVC_BUILD=${LIBCVC_BUILD:-cvc.4}
-ARISRVX_BUILD=${ARISRVX_BUILD:-cvc.3}
+LIBCVC=${LIBCVC:-4.0.0}
+LIBCVC_BUILD=${LIBCVC_BUILD:-cvc.2}
+ARISRVX_BUILD=${ARISRVX_BUILD:-cvc.1}
 
 cvcpkg install \
   "libcvc==$LIBCVC+$LIBCVC_BUILD" \
