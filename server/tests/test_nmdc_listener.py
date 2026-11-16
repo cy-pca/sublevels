@@ -183,3 +183,59 @@ def test_capture_records_both_ways(tmp_path):
     assert "> b'$Lock EXTENDEDPROTOCOL_sublevels_" in text
     assert "< b'$ValidateNick cap|'" in text
     assert "# closed:" in text
+
+
+@needs_openssl
+def test_keyprint_matches_openssl_and_follows_reloads(tmp_path):
+    import base64
+
+    from sublevels.nmdc.listener import keyprint_of
+
+    cert, key = make_cert(tmp_path)
+    der = subprocess.run(["openssl", "x509", "-in", cert, "-outform", "DER"], check=True,
+                         capture_output=True).stdout
+    digest = subprocess.run(["openssl", "dgst", "-sha256", "-binary"], input=der, check=True,
+                            capture_output=True).stdout
+    expect = "SHA256/" + base64.b32encode(digest).decode().rstrip("=")
+    assert keyprint_of(cert) == expect and len(expect) == len("SHA256/") + 52
+
+    async def go():
+        hub, listeners, ports = await hub_on(HubConfig(
+            nmdc_listen="off", nmdcs_listen="127.0.0.1:0", tls_cert=cert, tls_key=key,
+            nmdcs_address="nmdcs://hub.example:4111"))
+        assert hub.keyprint == expect
+        assert hub.nmdcs_url() == f"nmdcs://hub.example:4111/?kp={expect}"
+        assert hub.stats()["nmdcs_keyprint"] == expect
+        new_cert, new_key = make_cert(tmp_path, "hub2")
+        shutil.copy(new_cert, cert)
+        shutil.copy(new_key, key)
+        import os
+        os.utime(cert, ns=(5, 6))
+        assert listeners.tls.reload_if_changed()
+        assert hub.keyprint == keyprint_of(new_cert) != expect
+        await listeners.close(hub)
+
+    run(go())
+
+
+@needs_openssl
+def test_tls_required_force_move_carries_the_keyprint(tmp_path):
+    cert, key = make_cert(tmp_path)
+
+    async def go():
+        hub, listeners, ports = await hub_on(HubConfig(
+            nmdc_listen="127.0.0.1:0", nmdcs_listen="127.0.0.1:0", tls_cert=cert, tls_key=key,
+            tls_required=True, nmdcs_address="nmdcs://hub.example:4111"))
+        c = Client("plain")
+        await c.connect("127.0.0.1", ports["nmdc"])
+        msgs = [await c.read(), await c.read()]
+        assert msgs[1] == f"$ForceMove nmdcs://hub.example:4111/?kp={hub.keyprint}|"
+        assert "TLS" in msgs[0]
+        await c.close()
+        t = Client("secure")
+        await t.connect("127.0.0.1", ports["nmdcs"], tls=True)
+        await t.login()
+        await t.close()
+        await listeners.close(hub)
+
+    run(go())

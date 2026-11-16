@@ -57,8 +57,13 @@ class Service:
         return {"status": "ok", "version": self.version, "uptime": round(self.uptime(), 3)}
 
     def public_stats(self) -> dict:
-        """What anyone may read (D14): the live user count."""
-        return {"users": len(self.hub.users) if self.hub is not None else 0}
+        """What anyone may read: the live user count (D14), and the NMDCS address and keyprint."""
+        if self.hub is None:
+            return {"users": 0}
+        out = {"users": len(self.hub.users)}
+        if self.hub.keyprint:  # P7 §1: published beside the address, for clients to pin
+            out["nmdcs"] = {"address": self.hub.nmdcs_url(), "keyprint": self.hub.keyprint}
+        return out
 
     def admin_stats(self) -> dict:
         """The D14 counters and live values, for operators."""

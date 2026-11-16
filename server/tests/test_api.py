@@ -51,3 +51,10 @@ def test_admin_stats_needs_the_token():
     hub = r.json()["hub"]
     assert hub["users"] == 1 and hub["totals"]["logins"] == 1
     assert hub["clients"] == {"test": 1} and hub["connections"] == {"nmdc": 1}
+
+
+def test_public_stats_shows_the_nmdcs_keyprint():
+    service = _service_with_hub()
+    service.hub.set_keyprint("SHA256/" + "A" * 52)
+    body = TestClient(create_app(service)).get("/stats").json()
+    assert body["nmdcs"]["keyprint"] == "SHA256/" + "A" * 52
