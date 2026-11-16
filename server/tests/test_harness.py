@@ -4,6 +4,7 @@ a client makes it, and the published subtree as the relay would send it. No aris
 import pytest
 from fastapi.testclient import TestClient
 
+from nmdc_fakes import CP, Conn, myinfo
 from sublevels import __version__
 from sublevels.rpc import PING
 
@@ -48,3 +49,30 @@ def test_client_reads_nothing_outside_the_namespace(harness, server):
 def test_http_and_room_call_share_the_service(harness, server):
     http = TestClient(server.app).get("/healthz").json()
     assert http["version"] == harness.connect().call(PING)["version"] == __version__
+
+
+def test_client_reads_the_hub_and_its_user_list(harness, server):
+    hub = server.hub
+    conn = Conn()
+    s = hub.connect(conn, "10.9.8.7", 4000)
+    first = bytes(conn.data).split(b"|", 1)[0]
+    from sublevels.nmdc.codec import lock_to_key
+    key = lock_to_key(first[len(b"$Lock "):].split(b" Pk=")[0])
+    for m in (b"$Supports NoHello|", b"$Key " + key + b"|", b"$ValidateNick dora|",
+              CP.encode(myinfo("dora", share=42, description="hi ", client="ncdc"))):
+        hub.message(s, m)
+    assert s.online
+    try:
+        hub.publish()
+        viewer = harness.connect()
+        tree = viewer.get_tree(hub.tree_path)
+        assert tree["name"] == hub.config.name and tree["bot"] == hub.config.bot_nick
+        assert tree["users"]["count"] == "1"
+        (entry,) = tree["users"]["list"].values()
+        assert entry["nick"] == "dora" and entry["share"] == "42" and entry["client"] == "ncdc"
+        assert entry["mode"] == "A" and entry["protocol"] == "nmdc"
+        assert "10.9.8.7" not in repr(tree)  # addresses are never published
+    finally:
+        hub.disconnect(s)
+        hub.publish()
+    assert harness.connect().get_tree(hub.tree_path)["users"]["count"] == "0"

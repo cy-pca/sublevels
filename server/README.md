@@ -1,9 +1,8 @@
 # sublevels server
 
 The `sublevels` service: a Python package that runs in an `arisrvx` host (libcvc
-ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. M0 is the groundwork: it serves a
-health check, publishes a status subtree and answers one room-call. It speaks no NMDC yet; the
-listener comes in M1, in `src/sublevels/nmdc/`, from `spec/nmdc/`.
+ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC hub (M1, from
+`spec/nmdc/`), with an HTTP API, a room-call export and a published subtree beside it.
 
 | Path | What |
 |---|---|
@@ -11,10 +10,11 @@ listener comes in M1, in `src/sublevels/nmdc/`, from `spec/nmdc/`.
 | `src/sublevels/api.py` | The HTTP API (FastAPI): `GET /healthz` |
 | `src/sublevels/rpc.py` | Room-call exports: `sublevels.ping` |
 | `src/sublevels/server.py` | The entry point: `python -m sublevels.server` |
-| `src/sublevels/nmdc/` | The NMDC listener (M1); empty |
+| `src/sublevels/nmdc/` | The NMDC hub: see [its README](src/sublevels/nmdc/README.md) |
 | `main.py` | arisrvx's launcher for the same entry point |
 | `share/sublevels/server.ari` | The server document: publishes the `sublevels` namespace |
-| `tests/` | pytest: the service, the API, the Host and the S7 `ServerHarness` |
+| `tests/` | pytest: the hub per spec item, the service, the API, the Host and the S7 `ServerHarness` |
+| `tools/nmdc_client.py` | A small NMDC client for the tests, the smoke run and the soak |
 | `ci/install.sh`, `ci/smoke.sh` | Install the stack from cvcpkg; run the arisrvx smoke test |
 
 ## What it publishes and exports
@@ -23,6 +23,12 @@ listener comes in M1, in `src/sublevels/nmdc/`, from `spec/nmdc/`.
 - `sublevels.ping` (room-call, no arguments): `{pong: true, version, who}`, where `who` is the
   caller's principal id.
 - `GET /healthz`: `{status: "ok", version, uptime}`.
+- `GET /stats`: `{users}`. `GET /admin/stats` (`Authorization: Bearer <token>`, the token from
+  `$SUBLEVELS_ADMIN_TOKEN_FILE` or `$SUBLEVELS_ADMIN_TOKEN`; off without one): the D14 counters.
+- `sublevels.hubs.main.{name, topic, bot, users.count, users.list}`: the hub, for native clients.
+- NMDC on `$SUBLEVELS_NMDC_LISTEN` (`0.0.0.0:411`), NMDCS on `$SUBLEVELS_NMDCS_LISTEN`
+  (`0.0.0.0:4111`, with `$SUBLEVELS_TLS_CERT` and `$SUBLEVELS_TLS_KEY`). Port 411 needs the
+  privilege to bind it; the other settings are in `src/sublevels/nmdc/config.py`.
 
 ## Running it
 
