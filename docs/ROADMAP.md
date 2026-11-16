@@ -15,7 +15,7 @@ our forks of them.
 
 ## Decisions
 
-D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 are Joe's answers to the first draft's open questions, the same day. D11-D14 are Joe's additions of 2026-11-15 (geolocation, location policy, profiles and the connection log, analytics).
+D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 are Joe's answers to the first draft's open questions, the same day. D11-D14 are Joe's additions of 2026-11-15 (geolocation, location policy, profiles and the connection log, analytics). D15-D16 are Joe's additions of 2026-11-16 (many hub lists at once, and a hublist mode).
 
 | # | Decision |
 |---|----------|
@@ -33,6 +33,8 @@ D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 
 | D12 | **Location policy.** A hub can deny connections from listed countries (a denylist), or admit only listed countries (an allowlist), or neither. Operators, and accounts an operator exempts, bypass it. Addresses the database cannot place (private ranges, unknown) follow a setting, admitted by default. A refused connection gets one line saying why, and is logged. The policy is coarse: a VPN or proxy defeats it, and it is not presented as more than that. |
 | D13 | **Country on profiles, and a connection log.** A user's profile shows the country they are connecting from: in native clients as a field of the profile, and to NMDC clients, if the hub enables it, as a `[CC]` prefix on the description in `$MyINFO` (a hub rewrite that P2 §5 allows). Operators can open any user's connection log. Its live part is the registry's record (ARISRV_IDENTITY §2.2: the last 32 connections, each with pid, transport, public and local address, opened and closed, and geo; read with `server.client`, or `host.clients` in Python). The registry keeps records for one run only, so sublevels writes each connection to its own database as well, and adds what the hub knows: nick, account, client and version, protocol (NMDC, NMDCS or native), bytes, and why it closed. The admin document shows both. |
 | D14 | **Analytics.** The service keeps global counters and time series: live connections (by protocol, TLS and country), logins and refusals by reason, chat, private messages, searches and their fan-out, connection requests, relay-mode bytes (D6), bytes in and out, and the client mix. Live values are published as a series on the state plane, which an admin document draws with libcvc's chart widgets (in libcvc 4.0.0). History is stored downsampled (10 s for a day, 1 min for a month, 1 h for longer) and is readable over the admin API. Analytics cover every hub on the server, and every hub in the cluster once hubs are linked (D10, M7). The live user count is public; the rest is for operators. |
+| D15 | **Publish to many public hub lists at once.** A hub keeps a list of hub-list targets, each with its own method, and registers with all of them on a timer (every 15 minutes by default, with jitter) and on an operator's command. Each attempt's result is logged and shown in the admin document. The methods are: **push**, the NMDC registration exchange on TCP port 2501 by default, which Verlihub uses (P9); **pinger**, for lists that find hubs by connecting to them after the operator submits the hub once on the list's site, where the hub's part is answering pingers correctly (P9); and **API**, for any list found to have one. The default targets are Verlihub's two, `hublist.te-home.net` and `hublist.pwiam.com`. Candidates to check in M2 for reachability and method: dchublist.biz, dchublists.com, adchub.com (the FulDC++ list, which finds hubs by pinging them), and DCNF/Hublist (a GitHub aggregator that merges other lists). dchublist.org marks itself unmaintained and is left out. Each entry carries the public addresses (`dchub://` and `nmdcs://` with the keyprint), and once hubs are linked (D10), every public hub of the cluster. |
+| D16 | **A hublist mode.** A sublevels instance can also be a hub list. It accepts push registrations from any hub on port 2501, and verifies each with its own pinger, which logs in as an NMDC client and reads the hub's name, topic, `$HubINFO`, user count and share. It keeps each hub's uptime and reliability, drops hubs that stop answering, and lets operators approve, hide or ban entries. It adds the cluster's own hubs (D10), and may mirror other public lists. It serves the list over HTTP in the formats NMDC clients load into their public-hubs window: `hublist.xml.bz2` (the XML list current clients use) and the older `.config` text list for old clients, at an address such as `https://hublist.sublevels.net/hublist.xml.bz2`. It shows the same list inside its hubs (a `+hublist` command) and to native clients as a document. ADC lists come with M5. |
 
 ## Architecture
 
@@ -71,7 +73,7 @@ D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 
 
 | Path | What |
 |---|---|
-| `spec/nmdc/` | The NMDC spec implementers work from: P1-P9 below |
+| `spec/nmdc/` | The NMDC spec implementers work from: P1-P10 below |
 | `spec/adc/` | The ADC spec (M5) |
 | `spec/ext/` | Wire extensions (M6) |
 | `server/` | The `sublevels` Python package, the server document, and their tests |
@@ -98,7 +100,8 @@ own words.
 | P6 | Operator commands: `$Kick`, `$OpForceMove`, `$Close`, redirects, `$UserCommand`; how real clients show a kick, a ban and its reason | M2 |
 | P7 | Transport: NMDCS (TLS) and how clients find it, `ZPipe0`/ZLIB compression | M1 (TLS), M2 (ZLIB) |
 | P8 | The client-to-client protocol: `$MyNick`, `$Lock`, `$Direction`, `$ADCGET`/`$ADCSND`, file lists (`files.xml.bz2`), Tiger and TTH, segments, slots | M4 |
-| P9 | Hub-list registration and pinger behaviour: what a pinger sends and reads, and how a hub registers | M2 |
+| P9 | Hub-list registration and pinger behaviour, the hub's side: the push exchange (port 2501, `$Lock`/`$Key`, the pipe-separated record), what pingers send and read (`$BotINFO`, `$HubINFO`), and keeping pingers out of the user count | M2 |
+| P10 | The hub list's side (D16): accepting push registrations, the pinger, and the list formats clients load (`hublist.xml.bz2`, the `.config` list) | M2b |
 
 ## libcvc features the client needs
 
@@ -147,7 +150,7 @@ runners only.
     clients and hub passwords for NMDC clients.
   - Policy (D9): message of the day and rules documents, kick as a warning, temporary and
     permanent bans by hash, account, address or range.
-  - Public hub lists (P9).
+  - Public hub lists (D15, P9): push and pinger targets, all at once.
   - Geolocation (D11), location policy (D12), country on profiles and the operators' connection
     log (D13).
   - Analytics (D14): the stored series, the admin document with live and historical charts.
@@ -158,6 +161,9 @@ runners only.
   - Deploy: `hub.sublevels.net` in the sublevels.net zone (transfix/dns-zones), on the arisrvx host
     with TX.WTF and the rooms. TLS is terminated in the service, with the host's certificate,
     because NMDC is raw TCP and the web reverse proxy does not carry it.
+- **M2b, a hublist** (D16, P10): registrations on 2501, the pinger, `hublist.xml.bz2` and the
+  `.config` list over HTTP, operator moderation, the cluster's hubs, and the `+hublist` view. It is
+  tested with DC++, AirDC++ and ncdc loading the list as black boxes.
 - **M3, nicotina native.** Components in `client/` for the hub list, user list, main chat,
   private messages, search, the message of the day and rules, and relay-mode transfers (X8, X9)
   between native clients. nicotina imports them and connects to a sublevels hub in `arigl`,
