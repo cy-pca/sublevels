@@ -34,6 +34,8 @@ class Service:
         self.version = __version__
         self.started = clock()
         self.status = "starting"
+        self.hub = None  # the NMDC hub (sublevels.nmdc.Hub), once the server makes it
+        self.admin_token = ""  # the admin API's bearer token; "" turns the admin API off
 
     @property
     def server_path(self) -> str:
@@ -53,6 +55,15 @@ class Service:
     def health(self) -> dict:
         """The answer to ``GET /healthz``."""
         return {"status": "ok", "version": self.version, "uptime": round(self.uptime(), 3)}
+
+    def public_stats(self) -> dict:
+        """What anyone may read (D14): the live user count."""
+        return {"users": len(self.hub.users) if self.hub is not None else 0}
+
+    def admin_stats(self) -> dict:
+        """The D14 counters and live values, for operators."""
+        return {"version": self.version, "uptime": round(self.uptime(), 3),
+                "hub": self.hub.stats() if self.hub is not None else None}
 
     def ping(self, who: str = "") -> dict:
         """The answer to the ``sublevels.ping`` room-call: the server's version, and the caller's

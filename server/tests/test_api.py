@@ -19,3 +19,35 @@ def test_healthz():
 
 def test_unknown_route():
     assert TestClient(create_app(Service())).get("/nope").status_code == 404
+
+
+def _service_with_hub(token=""):
+    from nmdc_fakes import World
+
+    w = World()
+    w.login("alice")
+    service = Service()
+    service.hub = w.hub
+    service.admin_token = token
+    return service
+
+
+def test_public_stats_is_the_user_count():
+    client = TestClient(create_app(_service_with_hub()))
+    assert client.get("/stats").json() == {"users": 1}
+
+
+def test_admin_stats_off_without_a_token():
+    assert TestClient(create_app(_service_with_hub())).get("/admin/stats").status_code == 404
+
+
+def test_admin_stats_needs_the_token():
+    client = TestClient(create_app(_service_with_hub("test-admin-token")))
+    assert client.get("/admin/stats").status_code == 401
+    bad = client.get("/admin/stats", headers={"Authorization": "Bearer nope"})
+    assert bad.status_code == 401
+    r = client.get("/admin/stats", headers={"Authorization": "Bearer test-admin-token"})
+    assert r.status_code == 200
+    hub = r.json()["hub"]
+    assert hub["users"] == 1 and hub["totals"]["logins"] == 1
+    assert hub["clients"] == {"test": 1} and hub["connections"] == {"nmdc": 1}

@@ -3,10 +3,13 @@
 # check it stops cleanly.
 #
 #   1. arisrvx --python server/main.py --doc server/share/sublevels/server.ari, its relay on
-#      loopback ports, the HTTP API on another (SUBLEVELS_HTTP_LISTEN);
+#      loopback ports, the HTTP API, the NMDC listener and (with openssl to make a self-signed
+#      certificate) the NMDCS listener on others;
 #   2. GET /healthz answers with the package's version, and, when this arisrvx has room-call
 #      (libcvc S2), the log says sublevels.ping is exported;
-#   3. SIGTERM: arisrvx exits 0 within the shutdown timeout, with no traceback in its log.
+#   3. two clients (tools/nmdc_client.py, run by arisrvx's own python) log in over NMDC and NMDCS
+#      and chat, and GET /admin/stats counts their logins;
+#   4. SIGTERM: arisrvx exits 0 within the shutdown timeout, with no traceback in its log.
 #
 # The log is printed at the end either way.
 set -euo pipefail
@@ -26,10 +29,10 @@ cleanup() {
 trap cleanup EXIT
 fail() { echo "smoke: FAIL: $*" >&2; exit 1; }
 
-# Four free loopback ports, from arisrvx's own interpreter (nothing else is needed on the box).
-read -r state media ws http < <("$arisrvx" python -c '
+# Free loopback ports, from arisrvx's own interpreter (nothing else is needed on the box).
+read -r state media ws http nmdc nmdcs < <("$arisrvx" python -c '
 import socket
-socks = [socket.socket() for _ in range(4)]
+socks = [socket.socket() for _ in range(6)]
 for s in socks:
     s.bind(("127.0.0.1", 0))
 print(*(s.getsockname()[1] for s in socks))
@@ -37,9 +40,21 @@ for s in socks:
     s.close()
 ')
 version=$("$arisrvx" python -c "import sys; sys.path.insert(0, '$here/src'); import sublevels; print(sublevels.__version__)")
-echo "smoke: sublevels $version; relay 127.0.0.1:$state (media $media, ws $ws), http 127.0.0.1:$http"
+echo "smoke: sublevels $version; relay 127.0.0.1:$state (media $media, ws $ws), http 127.0.0.1:$http," \
+  "nmdc 127.0.0.1:$nmdc"
 
-SUBLEVELS_HTTP_LISTEN=127.0.0.1:$http "$arisrvx" \
+tls_env=(SUBLEVELS_NMDCS_LISTEN=off)
+if command -v openssl >/dev/null; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=smoke -keyout "$work/hub.key" \
+    -out "$work/hub.crt" >/dev/null 2>&1
+  tls_env=(SUBLEVELS_NMDCS_LISTEN=127.0.0.1:$nmdcs SUBLEVELS_TLS_CERT="$work/hub.crt"
+           SUBLEVELS_TLS_KEY="$work/hub.key")
+  echo "smoke: nmdcs 127.0.0.1:$nmdcs (a self-signed certificate)"
+fi
+token=smoke-admin-token-$RANDOM$RANDOM  # a test value for this run only
+
+env SUBLEVELS_HTTP_LISTEN=127.0.0.1:$http SUBLEVELS_NMDC_LISTEN=127.0.0.1:$nmdc "${tls_env[@]}" \
+  SUBLEVELS_ADMIN_TOKEN="$token" "$arisrvx" \
   --python "$here/main.py" --doc "$here/share/sublevels/server.ari" \
   --state-listen "127.0.0.1:$state" --media-listen "127.0.0.1:$media" --ws-listen "127.0.0.1:$ws" \
   --shutdown-timeout 5 >"$log" 2>&1 &
@@ -58,6 +73,19 @@ done
 echo "smoke: GET /healthz -> $body"
 grep -q "\"version\":\"$version\"" <<<"$body" || fail "/healthz did not report version $version"
 grep -q "\"status\":\"ok\"" <<<"$body" || fail "/healthz did not report status ok"
+
+"$arisrvx" python "$here/tools/nmdc_client.py" 127.0.0.1 "$nmdc" --nick smoke-plain \
+  || fail "an NMDC login and chat failed"
+logins=1
+if [[ "${tls_env[0]}" != SUBLEVELS_NMDCS_LISTEN=off ]]; then
+  "$arisrvx" python "$here/tools/nmdc_client.py" 127.0.0.1 "$nmdcs" --tls --nick smoke-tls \
+    || fail "an NMDCS login and chat failed"
+  logins=2
+fi
+stats=$(curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0.1:$http/admin/stats") \
+  || fail "GET /admin/stats failed"
+echo "smoke: GET /admin/stats -> $stats"
+grep -q "\"logins\":$logins" <<<"$stats" || fail "/admin/stats did not count $logins login(s)"
 
 kill -TERM "$pid"
 rc=
