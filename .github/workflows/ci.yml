@@ -13,7 +13,10 @@ name: ci
 #           TX.WTF mode (server/ci/smoke-package.sh).
 #   interop-ncdc  ncdc (Ubuntu's package) as a black box against the hub (server/interop/).
 #   interop-airdcpp  the AirDC++ web client's portable release, through its documented HTTP API.
-#   transfers  ncdc and AirDC++ download each other's files through the hub, over NMDC and NMDCS.
+#   airdcpp-webclient  cvcpkg's airdcpp-webclient package (its recipe is in
+#           cy-pca/airdcpp-webclient), for the transfers jobs.
+#   transfers  ncdc and that AirDC++ download each other's files through the hub, over NMDC and
+#           NMDCS.
 #   soak    6000 synthetic clients against the hub; memory, CPU and fan-out latency in the summary.
 #
 # GitHub-hosted runners only: this repository is public, and a pull request's workflows must
@@ -165,21 +168,103 @@ jobs:
           path: ${{ runner.temp }}/interop
           retention-days: 14
 
+  airdcpp-webclient:
+    # The AirDC++ web client the transfers jobs run: cvcpkg's airdcpp-webclient package, built from
+    # upstream's source by the recipe in cy-pca/airdcpp-webclient. Installed from cvcpkg.org once
+    # it is published there; until then built from that repository's recipe at AIRDCPP_RECIPE_REF
+    # on ubuntu-22.04 with GCC 12, as its own CI builds it (leveldb and websocketpp from
+    # cy-pca/cvcpkg#623's recipes, CVCPKG_DEPS_REF), and cached by those two refs. The installed
+    # prefix goes to the transfers jobs as an artifact.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      # cy-pca/airdcpp-webclient#1 (the recipe, moved from here).
+      AIRDCPP_RECIPE_REF: 08e795b592f14ce25a6b5e578323d00acf67634d
+      # cy-pca/cvcpkg#623, merged (leveldb 1.23, websocketpp 0.8.2).
+      CVCPKG_DEPS_REF: 80255a6cc73ded9eab0eb2e7927affa9400d774b
+      CC: gcc-12
+      CXX: g++-12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-cvcpkg
+      - name: Published on cvcpkg.org?
+        id: published
+        run: |
+          if cvcpkg info airdcpp-webclient >/dev/null 2>&1; then
+            echo "airdcpp-webclient is on cvcpkg.org: installing the published bundle"
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "airdcpp-webclient is not on cvcpkg.org yet: building cy-pca/airdcpp-webclient's recipe at $AIRDCPP_RECIPE_REF"
+            echo "yes=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install from cvcpkg.org
+        if: steps.published.outputs.yes == 'true'
+        run: |
+          cvcpkg install airdcpp-webclient --prefix "$RUNNER_TEMP/airdcpp" --config release \
+            --link shared --no-fallback-to-source
+      - name: Cached build of the recipe
+        if: steps.published.outputs.yes != 'true'
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/airdcpp
+          key: airdcpp-webclient-ubuntu-22.04-${{ env.AIRDCPP_RECIPE_REF }}-${{ env.CVCPKG_DEPS_REF }}
+      - name: The recipe (cy-pca/airdcpp-webclient)
+        if: steps.published.outputs.yes != 'true' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: cy-pca/airdcpp-webclient
+          ref: ${{ env.AIRDCPP_RECIPE_REF }}
+          path: .airdcpp-webclient
+          persist-credentials: false
+          sparse-checkout: recipes/airdcpp-webclient
+      - name: leveldb and websocketpp recipes (cy-pca/cvcpkg#623)
+        if: steps.published.outputs.yes != 'true' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: cy-pca/cvcpkg
+          ref: ${{ env.CVCPKG_DEPS_REF }}
+          path: .cvcpkg-deps
+          persist-credentials: false
+          sparse-checkout: |
+            recipes/_common
+            recipes/leveldb
+            recipes/websocketpp
+      - name: Build it from the recipe
+        if: steps.published.outputs.yes != 'true' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          recipes=(--recipes-dir .cvcpkg-deps/recipes --recipes-dir .airdcpp-webclient/recipes)
+          cvcpkg install-deps airdcpp-webclient "${recipes[@]}" \
+            --prefix "$RUNNER_TEMP/airdcpp" --config release --link shared \
+            --fallback-to-source --include-host-tools
+          cvcpkg build airdcpp-webclient --local "${recipes[@]}" \
+            --prefix "$RUNNER_TEMP/airdcpp" --config release --link shared --no-deps
+      - name: Check and hand on the prefix
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/airdcpp/bin/airdcppd" -v
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/airdcpp-webclient-prefix.tar.gz" airdcpp
+          ls -l "$RUNNER_TEMP/airdcpp-webclient-prefix.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: airdcpp-webclient-prefix
+          path: ${{ runner.temp }}/airdcpp-webclient-prefix.tar.gz
+          retention-days: 3
+
   transfers:
     # End-to-end file transfers through the hub (server/interop/transfers.py): ncdc (active and
-    # passive) and the AirDC++ web client see each other and download each other's files, every
-    # file checked by SHA-256, once over plain NMDC and once with every client over NMDCS
-    # (keyprint-pinned) against a TLS-only hub.
+    # passive) and the AirDC++ web client (cvcpkg's airdcpp-webclient, from the job above) see each
+    # other and download each other's files, every file checked by SHA-256, once over plain NMDC
+    # and once with every client over NMDCS (keyprint-pinned) against a TLS-only hub.
     name: transfers (${{ matrix.hub }})
+    needs: airdcpp-webclient
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         hub: [nmdc, nmdcs]
-    env:
-      AIRDCPP_URL: https://web-builds.airdcpp.net/stable/airdcpp_2.14.0_webui-2.14.0_64-bit_portable.tar.gz
-      AIRDCPP_SHA256: fe89c40d1bbb11350e5e175f60ca9de325dbc6e5a778024429ba1bdf633bad1a
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -189,16 +274,18 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ncdc tmux
-      - name: Download AirDC++ 2.14.0 (portable, checked)
+      - uses: actions/download-artifact@v4
+        with:
+          name: airdcpp-webclient-prefix
+          path: ${{ runner.temp }}
+      - name: AirDC++ (cvcpkg airdcpp-webclient)
         run: |
-          mkdir -p "$RUNNER_TEMP/airdcpp"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/airdcpp.tar.gz" "$AIRDCPP_URL"
-          echo "$AIRDCPP_SHA256  $RUNNER_TEMP/airdcpp.tar.gz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/airdcpp.tar.gz" -C "$RUNNER_TEMP/airdcpp"
+          tar -xzf "$RUNNER_TEMP/airdcpp-webclient-prefix.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/airdcpp/bin/airdcppd" -v
       - name: Transfers
         run: |
           python server/interop/transfers.py ${{ matrix.hub == 'nmdcs' && '--tls' || '' }} \
-            --airdcppd "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" --out "$RUNNER_TEMP/transfers"
+            --airdcppd "$RUNNER_TEMP/airdcpp/bin/airdcppd" --out "$RUNNER_TEMP/transfers"
       - name: Findings
         if: always()
         run: cat "$RUNNER_TEMP/transfers/findings.md" >> "$GITHUB_STEP_SUMMARY" || true
