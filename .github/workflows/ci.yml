@@ -57,6 +57,8 @@ jobs:
       SUBLEVELS_REQUIRE_PYCVC: '1'
       # And the ServerHarness tests (libcvc S7, in the set server/ci/install.sh pins).
       SUBLEVELS_REQUIRE_HARNESS: '1'
+      # And the room bridge's harness test (arisrvx's bridged-users API, libcvc 4.0.2).
+      SUBLEVELS_REQUIRE_BRIDGE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-cvcpkg
