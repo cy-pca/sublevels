@@ -180,6 +180,7 @@ class Hub:
         self._publish_timer = None
         self._bad_pass: dict[str, Window] = {}  # identity -> failures
         self.keyprint = ""  # the NMDCS certificate's (P7 §1), once the listener has loaded it
+        self.bridge = None  # the room bridge (sublevels.bridge.RoomBridge), when the host has one
         bot = self.config.bot_nick
         self.bot_key = nick_key(bot)
         self.bot_info = self._enc(f"$MyINFO $ALL {bot} {escape(self.config.bot_description)}$ $"
@@ -315,6 +316,8 @@ class Hub:
         if was_online and self.users.get(s.key) is s:
             del self.users[s.key]
             self.broadcast(f"$Quit {s.nick}|")
+            if self.bridge is not None:
+                self.bridge.offline(s)
             if s.is_op:
                 self._send_oplist_all()
             self._dirty()
@@ -399,6 +402,8 @@ class Hub:
         k = nick_key(nick)
         if k == self.bot_key or k in {nick_key(n) for n in self.config.reserved_nicks}:
             return "reserved"
+        if self.bridge is not None and self.bridge.reserves(k):
+            return "reserved"  # room users' names (P3 §5)
         if k in self.claimed:
             return "taken"
         return ""
@@ -504,6 +509,8 @@ class Hub:
         s.info_due = self.clock() + self.limits.myinfo_interval
         self.counters.add("myinfo_updates")
         self._fan(s.info_bytes, self.users.values())
+        if self.bridge is not None:
+            self.bridge.updated(s)
 
     def _go_online(self, s: Session) -> None:
         now = self.clock()
@@ -540,6 +547,8 @@ class Hub:
         for line in self.config.motd:
             self.bot_say(s, line)
         self.bot_say(s, "Type +rules to read the rules, +help for the hub's commands.")
+        if self.bridge is not None:
+            self.bridge.online(s)
         self._dirty()
 
     def _oplist(self) -> str:
@@ -620,6 +629,8 @@ class Hub:
         self.counters.add("chat")
         n = self._fan(self._enc(text), self.users.values())  # the sender too (P3 §1)
         self.counters.add("chat_fanout", n)
+        if self.bridge is not None:
+            self.bridge.chat(s, body)
 
     def _to(self, s: Session, text: str) -> None:
         # $To: <target> From: <sender> $<<sender>> text|
@@ -642,6 +653,8 @@ class Hub:
                            f"{self.limits.pm_text_max} bytes.")
             return
         u = self.users.get(k)
+        if u is None and self.bridge is not None and self.bridge.pm(s, target, body):
+            return
         if u is None:
             self.counters.drop("pm_offline")
             self.bot_pm(s, f"{target} is not online.")
