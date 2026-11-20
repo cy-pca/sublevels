@@ -1,7 +1,7 @@
 # P7. Transport: TLS, and compression
 
 Sources: [NMDC] §4.4.38, §4.5.16, §4.5.17, §4.6.19; [ADC-EXT] §3.16 (KEYP); [OBS-VH]; [OBS-EI];
-the D-items in docs/ROADMAP.md (D1, M2's deployment).
+the D-items in docs/ROADMAP.md (D1, M2's deployment); [CAP-ncdc-1.23.1], [CAP-airdcpp-2.14.0].
 
 ## 1. Hub TLS (`nmdcs://`)
 
@@ -58,10 +58,28 @@ the D-items in docs/ROADMAP.md (D1, M2's deployment).
 - The hub adds no hint. If M1's captures show a target client switching to TLS because of one, the
   hub adds the same hint.
 
+## Captured in M1
+
+Black-box captures from M1's interop and transfer runs (2026-11-16): ncdc 1.23.1 (Ubuntu package)
+and the AirDC++ web client 2.14.0 (portable build), against the sublevels hub.
+
+- **`nmdcs://`.** ncdc starts TLS with the first byte on the NMDCS port, and took a self-signed
+  certificate on first use without being asked [CAP-ncdc-1.23.1].
+- **Keyprints.** Both clients accept `?kp=SHA256/<base32>` in an `nmdcs://` address and log in
+  [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0]. The hub computes its keyprint as [ADC-EXT] KEYP defines it: `SHA256/`, then the
+  unpadded base32 SHA-256 of the certificate's DER. It recomputes it whenever the certificate is
+  reloaded.
+  - With a wrong keyprint, AirDC++ ends the TLS handshake. The hub never sees a login. AirDC++
+    reports the session as `disconnected`, not the `keyprint_mismatch` state its API documents
+    [CAP-airdcpp-2.14.0].
+- **`$ForceMove` to `nmdcs://`.** AirDC++ follows `$ForceMove nmdcs://host:port/?kp=…|` from a
+  TLS-only hub (§1, `tls_required`) and ends up on NMDCS [CAP-airdcpp-2.14.0]. In one run it reconnected by
+  itself. In an earlier one it showed a `redirect` state with the address until its API followed it.
+- **Client TLS.** Client-to-client connections with the `S` suffix ran over TLS [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0].
+
 ## To capture
 
-- How DC++, AirDC++, EiskaltDC++ and ncdc each treat `nmdcs://`: TLS versions, SNI, certificate
-  checking, and whether each reads `kp`.
-- Whether each client follows a `$ForceMove` to an `nmdcs://` address.
+- How DC++ and EiskaltDC++ treat `nmdcs://`: TLS versions, SNI, certificate checking, and `kp`.
+- Whether ncdc, DC++ and EiskaltDC++ follow a `$ForceMove` to an `nmdcs://` address.
 - Whether any target client uses a TLS hint in the lock.
-- The exact bytes of `$ZOn`, from a client that receives it.
+- The exact bytes of `$ZOn`, from a client that receives it (AirDC++ lists `ZPipe0`).

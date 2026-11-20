@@ -26,7 +26,9 @@ Every file lists the sources it was written from, by these tags.
 | [D-n] | Decision n in [docs/ROADMAP.md](../docs/ROADMAP.md) |
 | [OBS-VH] | Behaviour of the Verlihub hub (upstream source), observed by the spec writer and stated here as behaviour only |
 | [OBS-EI] | Behaviour of the EiskaltDC++ client (upstream source), observed the same way |
-| [CAP-…] | A black-box capture, named by client, version and date (none yet) |
+| [CAP-ncdc-1.23.1] | Black-box captures of ncdc 1.23.1 (Ubuntu package) against the hub, from M1's interop and transfer runs, 2026-11-16 (cy-pca/sublevels#8, #10) |
+| [CAP-airdcpp-2.14.0] | Black-box captures of the AirDC++ web client 2.14.0 (portable build, driven through its documented HTTP API), from the same runs |
+| [CAP-…] | Further captures, named by client and version |
 
 [NMDC] is the base for all of `nmdc/`. It is a community reconstruction and has gaps and some
 errors; where this spec departs from it, the item says why.

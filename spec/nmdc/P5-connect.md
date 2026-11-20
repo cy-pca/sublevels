@@ -1,6 +1,6 @@
 # P5. Connection signalling
 
-Sources: [NMDC] §4.2.1, §4.4.3, §4.4.4, §4.6.10, §4.6.18, §4.6.19; [ADC-EXT] §3.9 (NATT); [D-6].
+Sources: [NMDC] §4.2.1, §4.4.3, §4.4.4, §4.6.10, §4.6.18, §4.6.19; [ADC-EXT] §3.9 (NATT); [D-6]; [CAP-ncdc-1.23.1], [CAP-airdcpp-2.14.0].
 
 The hub only passes connection requests between users. The connection itself, and every transfer,
 is client to client (P8), or for native users relay mode [D-6].
@@ -67,10 +67,23 @@ advertise or forward ACTM in M1.
   end-to-end encrypted channel, where neither learns the other's address [D-6]. That signalling
   is not NMDC and is specified with relay mode (M3).
 
+## Captured in M1
+
+Black-box captures from M1's interop and transfer runs (2026-11-16): ncdc 1.23.1 (Ubuntu package)
+and the AirDC++ web client 2.14.0 (portable build), against the sublevels hub.
+
+- **`$ConnectToMe`.** Both clients use the two-argument form, `$ConnectToMe <remote> <ip>:<port>S|`
+  [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0]. The `S` suffix appears whenever both users list `TLS`, even on a plain-NMDC hub.
+  The client-to-client connection then runs over TLS through the hub's rewritten address.
+- **`$RevConnectToMe`.** `$RevConnectToMe ncdcC ncdcA|`, the passive user first [CAP-ncdc-1.23.1]. The active
+  user answers with `$ConnectToMe <requester> <ip>:<port>S|`.
+- **NAT traversal.** No suffix other than `S`, no extra argument and no `$Supports` feature for it
+  was seen [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0].
+- **Over NMDCS.** Transfers in both modes used the `S` suffix and the rewritten addresses through a
+  TLS-only hub [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0].
+
 ## To capture
 
-- What NAT traversal each target client sends in NMDC (suffixes on the port, extra arguments, a
-  `$Supports` feature) and what it expects back. [ADC-EXT] §3.9 (NATT) describes the ADC form, and
-  clients that have it in NMDC may follow it.
-- Which form of `$ConnectToMe` each client sends.
+- What NAT traversal DC++ and EiskaltDC++ send in NMDC, if any. [ADC-EXT] §3.9 (NATT) describes
+  the ADC form.
 - Whether any client sends `$ConnectToMe` to a remote user it learned of from another hub.

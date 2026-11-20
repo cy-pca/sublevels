@@ -1,7 +1,7 @@
 # P2. Hub login, the user list and `$MyINFO`
 
 Sources: [NMDC] §4.4.6–4.4.8, §4.4.17–4.4.19, §4.4.25–4.4.32, §4.4.37, §4.5.1, §4.5.4–4.5.5,
-§4.5.8–4.5.9, §4.6.1, §4.6.3, §4.6.11, §5.1; [D-7], [D-9].
+§4.5.8–4.5.9, §4.6.1, §4.6.3, §4.6.11, §5.1; [D-7], [D-9]; [CAP-ncdc-1.23.1], [CAP-airdcpp-2.14.0].
 
 ## 1. States
 
@@ -168,11 +168,36 @@ Users who connect natively over arisrvx appear to NMDC users as ordinary users. 
 exists (M3, M4). They take part in chat (P3) and search (P4) through the hub. Relay-mode
 transfers are between native clients only [D-6].
 
+## Captured in M1
+
+Black-box captures from M1's interop and transfer runs (2026-11-16): ncdc 1.23.1 (Ubuntu package)
+and the AirDC++ web client 2.14.0 (portable build), against the sublevels hub.
+
+- **Login bursts.** Both clients send `$Supports`, `$Key`, `$ValidateNick` and `$Version 1,0091`
+  together, before `$Hello`, so §1's order tolerance is needed. After `$Hello`, the two differ:
+  - ncdc sends `$MyINFO`, then `$GetNickList` [CAP-ncdc-1.23.1];
+  - AirDC++ sends `$GetNickList`, then `$MyINFO` [CAP-airdcpp-2.14.0]. §2 step 8, answering an early
+    `$GetNickList` once the user is online, is what makes this work.
+- **Features.**
+  - ncdc: `$Supports NoGetINFO NoHello UserIP2 TLS|` [CAP-ncdc-1.23.1].
+  - AirDC++: `$Supports UserCommand NoGetINFO NoHello UserIP2 TTHSearch ZPipe0 TLS |`, with the
+    trailing space §2 allows [CAP-airdcpp-2.14.0].
+
+  Both have `NoHello` and `NoGetINFO`. Both log in on the hub's `$Hello` with their own `$MyINFO`
+  in the list (§6).
+- **`$MyINFO`.**
+  - ncdc: `$MyINFO $ALL ncdcA <ncdc V:1.23.1,M:A,H:1/0/0,S:10>$ $0.005<0x11>$$2560$` [CAP-ncdc-1.23.1].
+    The description is empty, so the tag is all of it. The connection field is a bare number in
+    Mbit/s. The flag 0x11 is normal plus TLS. The email is empty.
+  - AirDC++: `$MyINFO $ALL airdcpp <AirDC++w V:2.14.0,M:A,H:1/0/0,S:2>$ $0.1S$$2688$` [CAP-airdcpp-2.14.0]. The
+    flag byte is `S` (0x53): normal, away, TLS and IPv4. The headless web client reports itself
+    away, and answers private messages with an automatic away reply, which the hub forwards like
+    any `$To`.
+
+  §5's parser handles both. Hub policy that reads the connection field must accept a bare number.
+
 ## To capture
 
-- The exact login bursts each target client sends: what arrives together, and in what order.
-- Whether any target client still lacks `NoHello` or `NoGetINFO` today.
+- The login bursts of DC++ and EiskaltDC++.
 - What each client shows for `$HubIsFull`, `$ValidateDenide` and `$BadPass`, and whether it retries.
-- Whether each client accepts `$Hello` for its own nick as the only acceptance signal, or also needs
-  its own `$MyINFO` back (§6 sends both).
 - How clients react to a `$UserIP` that lists only themselves.
