@@ -33,9 +33,9 @@ depends:
   build: []
   runtime:
     - name: arisrvx
-      version: ">=4.0.0"
+      version: ">=4.0.2"
     - name: pycvc-cp312
-      version: ">=4.0.0"
+      version: ">=4.0.2"
     - name: fastapi-cp312
     - name: uvicorn-cp312
     - name: python312

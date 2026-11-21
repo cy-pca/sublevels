@@ -22,6 +22,7 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 | `interop/soak.py` | Synthetic clients toward 6000+ (D7): memory, CPU and fan-out latency |
 | `bin/sublevels` | The `sublevels` command: the relay, the hub, the HTTP API and TX.WTF in one arisrvx |
 | `src/sublevels/txwtf_service.py` | TX.WTF in this process, a separate instance, or none |
+| `src/sublevels/bridge.py` | NMDC users in the conference room; the hub's chat and the room's joined |
 | `ci/install.sh`, `ci/smoke.sh`, `ci/smoke-package.sh` | Install the stack from cvcpkg; the arisrvx smoke run; the installed command's |
 
 ## What it publishes and exports
@@ -33,6 +34,10 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 - `GET /stats`: `{users}`. `GET /admin/stats` (`Authorization: Bearer <token>`, the token from
   `$SUBLEVELS_ADMIN_TOKEN_FILE` or `$SUBLEVELS_ADMIN_TOKEN`; off without one): the D14 counters.
 - `sublevels.hubs.main.{name, topic, bot, users.count, users.list}`: the hub, for native clients.
+- **The room bridge** (`src/sublevels/bridge.py`; arisrvx and pycvc 4.0.2+): every online NMDC
+  user is a bridged user of the conference room (`--room`), listed in its users for Ariadne
+  clients. NMDC main chat and the room chat are joined, and direct messages go both ways. Room
+  users appear to NMDC clients as `[room]name`, a prefix no hub nick may take.
 - NMDC on `$SUBLEVELS_NMDC_LISTEN` (`0.0.0.0:411`), NMDCS on `$SUBLEVELS_NMDCS_LISTEN`
   (`0.0.0.0:4111`, with `$SUBLEVELS_TLS_CERT` and `$SUBLEVELS_TLS_KEY`). Port 411 needs the
   privilege to bind it; the other settings are in `src/sublevels/nmdc/config.py`.
