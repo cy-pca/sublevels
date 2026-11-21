@@ -126,8 +126,8 @@ class Airdcpp:
     def wait_listening(self, tcp: int, udp: int, tls: int, timeout: float = 45.0) -> bool:
         """Wait until airdcppd listens on the ports /settings/set gave it. It applies new ports
         seconds later (about 9 s for 2.14.0), with no listeners for a moment while it switches: a
-        hub search sent meanwhile carries no UDP port, and searches made before it settles have
-        crashed it (signal 11). self.listening keeps the ports it last reported."""
+        hub search sent meanwhile carries no UDP port, which the hub drops. self.listening keeps
+        the ports it last reported."""
         want = {"tcp_port": tcp, "udp_port": udp, "tls_port": tls}
         end = time.time() + timeout
         since = None
@@ -216,6 +216,13 @@ async def run(airdcppd: str, ncdc_bin: str, out: str) -> int:
         dc.api("POST", "/share_roots", {"path": dc.share + "/"})
         if not check("airdcppd listens on the ports it was given",
                      dc.wait_listening(tcp, udp, tls), dc.listening):
+            return 1
+        # With no UI active a fresh airdcppd is idle-away, and answers a private message with its
+        # away message. That path crashes it now and then (signal 11, about 1 in 60 incoming
+        # private messages against this build), whatever the hub sent. This run tests the hub, not
+        # away mode, so turn it off.
+        away = dc.api("POST", "/system/away", {"away": False})
+        if not check("AirDC++ is not away", away.get("id") == "off", away.get("id", "")):
             return 1
         hubsess = dc.api("POST", "/hubs", {"hub_url": hub_url})
         sid = hubsess["id"]
