@@ -172,16 +172,16 @@ jobs:
     # The AirDC++ web client the transfers jobs run: cvcpkg's airdcpp-webclient package, built from
     # upstream's source by the recipe in cy-pca/airdcpp-webclient. Installed from cvcpkg.org once
     # it is published there; until then built from that repository's recipe at AIRDCPP_RECIPE_REF
-    # on ubuntu-22.04 with GCC 12, as its own CI builds it (leveldb, websocketpp and airdcpp-webui
-    # from cy-pca/cvcpkg's recipes at CVCPKG_DEPS_REF), and cached by those two refs. The installed
+    # on ubuntu-22.04 with GCC 12, as its own CI builds it (whatever cvcpkg.org lacks, from
+    # cy-pca/cvcpkg's recipes at CVCPKG_DEPS_REF), and cached by those two refs. The installed
     # prefix goes to the transfers jobs as an artifact.
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     env:
-      # cy-pca/airdcpp-webclient#1 (the recipe, moved from here).
-      AIRDCPP_RECIPE_REF: c4d81807a274050b37259c9f0f54530df2373c97
-      # cy-pca/cvcpkg master with #623 (leveldb, websocketpp) plus the airdcpp-webui recipe.
-      CVCPKG_DEPS_REF: 9c638dd74e952577e820705f48a737114c5e22bc
+      # cy-pca/airdcpp-webclient master: the recipe (#1, moved from here) and its macOS leg (#2).
+      AIRDCPP_RECIPE_REF: 38b13d66b45df23ae97712cfd58f7019ebcf5323
+      # cy-pca/cvcpkg master after #630 (airdcpp-webui) and #631 (snappy, leveldb with Snappy).
+      CVCPKG_DEPS_REF: 65b93b80c833d7e3465c2f69fcfe2d24133cf06d
       CC: gcc-12
       CXX: g++-12
     steps:
@@ -229,6 +229,7 @@ jobs:
           sparse-checkout: |
             recipes/_common
             recipes/leveldb
+            recipes/snappy
             recipes/websocketpp
             recipes/airdcpp-webui
       - name: Build it from the recipe
