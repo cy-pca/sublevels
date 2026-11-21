@@ -1,6 +1,6 @@
 # P1. Framing, text, escaping, `$Lock` and `$Key`
 
-Sources: [NMDC] §4.1, §4.1.3, §4.4.38, §4.4.39, §4.5.9; [D-8]; [OBS-VH] (lock layout).
+Sources: [NMDC] §4.1, §4.1.3, §4.4.38, §4.4.39, §4.5.9; [D-8]; [OBS-VH] (lock layout); [CAP-ncdc-1.23.1], [CAP-airdcpp-2.14.0].
 
 ## 1. Messages on the stream
 
@@ -120,10 +120,20 @@ The hub enforces these limits per connection. Each one is a hub setting; the def
 - Rate limits on particular commands (chat, search, connection requests, `$MyINFO`) belong to
   their own items.
 
+## Captured in M1
+
+Black-box captures from M1's interop and transfer runs (2026-11-16): ncdc 1.23.1 (Ubuntu package)
+and the AirDC++ web client 2.14.0 (portable build), against the sublevels hub.
+
+- **`$Key`.** Both clients computed the key exactly as §5 says, on every connection [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0].
+  The non-fatal default stays until DC++ and EiskaltDC++ are captured too.
+- **Keepalives.** ncdc sent no `|` keepalive in about 10 s per connection [CAP-ncdc-1.23.1]. Longer runs are
+  needed to find the interval.
+- **The DCN scheme.** ncdc writes `/%DCN096%/` and the other DCN escapes in its `$Key` [CAP-ncdc-1.23.1].
+
 ## To capture
 
-- Whether DC++, EiskaltDC++, AirDC++ and ncdc each send `|` keepalives, and how often.
-- Which of these clients use the DCN scheme in chat as well as the HTML scheme.
-- Whether every target client's `$Key` matches the algorithm in section 5 (to decide the strict
-  default).
+- The keepalive interval of each target client, from runs of several minutes.
+- Whether DC++ and EiskaltDC++ compute `$Key` correctly (to decide the strict default).
+- Which clients use the DCN scheme in chat as well as the HTML scheme.
 - How each client decodes the five unassigned Windows-1252 bytes.
