@@ -195,6 +195,9 @@ async def run(airdcppd: str, ncdc_bin: str, tls: bool, out: str) -> int:
             "connection_ip_v4": "127.0.0.1", "connection_mode_v6": -1,
             "download_directory": dc_dl + "/"})
         dc.api("POST", "/share_roots", {"path": dc.share + "/"})
+        if not check("airdcppd listens on the ports it was given",
+                     dc.wait_listening(tcp, udp, tlsp), dc.listening):
+            return 1
         sid = dc.api("POST", "/hubs", {"hub_url": url})["id"]
 
         # 1. login, and who sees whom
