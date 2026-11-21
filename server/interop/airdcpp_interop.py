@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import http.client
 import json
 import os
 import shutil
@@ -44,6 +45,10 @@ from ncdc_interop import Ncdc, check, free_ports, results, seen, write_findings 
 from nmdc_client import Client  # noqa: E402
 
 USER, PASSWORD = "interop", "interop-test-password"  # a test web user for this run only
+
+
+class AirdcppdDied(Exception):
+    """airdcppd exited while the run was talking to it; the message has its status and log."""
 
 
 class Airdcpp:
@@ -68,24 +73,74 @@ class Airdcpp:
         self.proc = subprocess.Popen([binary, f"-c={self.cfg}", "--no-auto-connect", "--cdm-hub"],
                                      stdout=self.log, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL)
+        self.listening = ""
+        self.crashed = False
 
-    def api(self, method: str, path: str, body=None, timeout: float = 10.0):
+    def api(self, method: str, path: str, body=None, timeout: float = 10.0, retries: int = 3):
         data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(self.base + path, data=data, method=method,
-                                     headers={"Authorization": self.auth,
-                                              "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            text = r.read().decode()
-            return json.loads(text) if text else None
+        for attempt in range(retries + 1):
+            req = urllib.request.Request(self.base + path, data=data, method=method,
+                                         headers={"Authorization": self.auth,
+                                                  "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    text = r.read().decode()
+                    return json.loads(text) if text else None
+            except urllib.error.HTTPError:
+                raise
+            except (urllib.error.URLError, http.client.HTTPException, ConnectionError) as e:
+                # A dropped connection is either airdcppd going down (report that, with its log)
+                # or a busy moment (try again shortly). A crashing airdcppd closes the connection
+                # as it exits, so a drop gets a few seconds to show which.
+                reason = e.reason if isinstance(e, urllib.error.URLError) else e
+                rc = self.exited(5.0 if isinstance(reason, ConnectionResetError) else 0.0)
+                if rc is not None:
+                    raise AirdcppdDied(f"airdcppd exited with status {rc} during {method} "
+                                       f"{path} ({type(reason).__name__}: {reason}); the end of "
+                                       f"its log:\n{self.log_tail()}") from e
+                if attempt == retries:
+                    raise
+                time.sleep(0.25 * 2 ** attempt)
+
+    def exited(self, grace: float = 0.0) -> int | None:
+        """airdcppd's exit status once it has exited (waiting up to grace seconds), else None."""
+        try:
+            return self.proc.wait(grace) if grace else self.proc.poll()
+        except subprocess.TimeoutExpired:
+            return None
+
+    def log_tail(self, lines: int = 40) -> str:
+        with open(self.log.name, errors="replace") as f:
+            return "".join(f.readlines()[-lines:])
 
     def wait_up(self, timeout: float = 60.0) -> bool:
         end = time.time() + timeout
         while time.time() < end:
             try:
-                self.api("GET", "/sessions/self")
+                self.api("GET", "/sessions/self", retries=0)
                 return True
             except (urllib.error.URLError, ConnectionError, OSError):
                 time.sleep(0.5)
+        return False
+
+    def wait_listening(self, tcp: int, udp: int, tls: int, timeout: float = 45.0) -> bool:
+        """Wait until airdcppd listens on the ports /settings/set gave it. It applies new ports
+        seconds later (about 9 s for 2.14.0), with no listeners for a moment while it switches: a
+        hub search sent meanwhile carries no UDP port, and searches made before it settles have
+        crashed it (signal 11). self.listening keeps the ports it last reported."""
+        want = {"tcp_port": tcp, "udp_port": udp, "tls_port": tls}
+        end = time.time() + timeout
+        since = None
+        while time.time() < end:
+            st = self.api("GET", "/connectivity/status")
+            self.listening = ", ".join(f"{k}={st.get(k)!r}" for k in want)
+            if all(str(st.get(k)) == str(v) for k, v in want.items()):
+                since = since or time.time()
+                if time.time() - since >= 1.0:  # the switch flaps before it settles
+                    return True
+            else:
+                since = None
+            time.sleep(0.2)
         return False
 
     def poll(self, fn, timeout: float = 30.0, every: float = 0.5):
@@ -107,7 +162,10 @@ class Airdcpp:
                 self.proc.wait(20)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+                self.proc.wait()
         self.log.close()
+        # airdcppd's crash handler logs the signal, then exits with its number.
+        self.crashed = "\nSignal: " in self.log_tail(200)
 
 
 async def run(airdcppd: str, ncdc_bin: str, out: str) -> int:
@@ -156,6 +214,9 @@ async def run(airdcppd: str, ncdc_bin: str, out: str) -> int:
             "connection_ip_v4": "127.0.0.1", "connection_mode_v6": -1,
         })
         dc.api("POST", "/share_roots", {"path": dc.share + "/"})
+        if not check("airdcppd listens on the ports it was given",
+                     dc.wait_listening(tcp, udp, tls), dc.listening):
+            return 1
         hubsess = dc.api("POST", "/hubs", {"hub_url": hub_url})
         sid = hubsess["id"]
 
@@ -226,6 +287,9 @@ async def run(airdcppd: str, ncdc_bin: str, out: str) -> int:
             await asyncio.sleep(0.5)
         check("ncdcA downloads AirDC++'s file list", bool(nc.file_lists()),
               ", ".join(nc.file_lists()))
+    except AirdcppdDied as e:
+        check("airdcppd keeps running", False, str(e).split("\n")[0])
+        print(str(e), flush=True)
     finally:
         if nc is not None:
             nc.stop(out)
@@ -243,6 +307,9 @@ async def run(airdcppd: str, ncdc_bin: str, out: str) -> int:
         hub_log.close()
         shutil.rmtree(root, ignore_errors=True)
 
+    if dc is not None:
+        check("airdcppd ran without crashing", not dc.crashed,
+              f"exit status {dc.proc.returncode}")
     stats = json.load(open(stats_path)) if os.path.exists(stats_path) else {}
     totals = stats.get("totals", {})
     check("every $Key matched", totals.get("key_mismatch", 0) == 0,
