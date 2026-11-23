@@ -27,7 +27,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-from . import NAMESPACE, __version__, api, rpc
+from . import NAMESPACE, __version__, api, bridge, rpc
 from . import txwtf_service as txwtf
 from .nmdc import Hub, HubConfig, start_listeners
 from .service import Service
@@ -67,6 +67,12 @@ def build(host: Any = None, config: HubConfig | None = None) -> Server:
     service = Service(host)
     hub = Hub(config or HubConfig.from_env(), tree=host, call_later=host.loop.call_later)
     service.hub = hub
+    if bridge.available(host):
+        # The relay's room in arisrvx; under plain python, the hub's (SUBLEVELS_ROOM).
+        bridge.RoomBridge(hub, host, getattr(host, "room", None) or hub.config.room)
+    else:
+        log.warning("this host has no bridged-users API (arisrvx and pycvc before 4.0.2): NMDC "
+                    "users are not put in the conference room")
     service.admin_token = admin_token()
     return Server(host, service, api.create_app(service), hub, rpc.register(service))
 

@@ -3,13 +3,12 @@
 # into ROOT/deps, as an operator installs them. ROOT/deps/bin/python3.12 is cvcpkg's CPython, the
 # one arisrvx embeds, and runs the tests with pycvc beside it.
 #
-# The pins: libcvc 4.0.0, the first release on cvcpkg with libcvc S2-S7 (export/room-call,
-# authenticate, read scope, ServerHarness) in arisrvx and pycvc-cp312. libcvc is pinned to the build
-# arisrvx and pycvc-cp312 4.0.0+cvc.1 were built against (4.0.0+cvc.2, published 2026-11-16 01:02Z,
-# minutes before them; every libcvc symbol arisrvx imports is defined there). Every pin matters:
-# arisrvx and pycvc-cp312 depend on libcvc with no version, and a libcvc republished under the same
-# upstream version has dropped symbols before (3.7.13+cvc.4 broke arisrvx 3.7.13+cvc.2). Move all
-# three together.
+# The pins: libcvc 4.0.2, the first release with arisrvx's bridged-users API (transfix/libcvc#1302,
+# the room bridge) beside S2-S7 (room-call, authenticate, read scope, ServerHarness). libcvc is
+# pinned to the build arisrvx and pycvc-cp312 4.0.2+cvc.1 were built against (4.0.2+cvc.2,
+# published 2026-11-20 07:12Z, minutes before them). Every pin matters: arisrvx and pycvc-cp312
+# depend on libcvc with no version, and a libcvc republished under the same upstream version has
+# dropped symbols before (3.7.13+cvc.4 broke arisrvx 3.7.13+cvc.2). Move all three together.
 set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: $0 ROOT" >&2; exit 2; }
@@ -17,7 +16,7 @@ mkdir -p "$1"
 root=$(cd "$1" && pwd)
 deps=$root/deps
 
-LIBCVC=${LIBCVC:-4.0.0}
+LIBCVC=${LIBCVC:-4.0.2}
 LIBCVC_BUILD=${LIBCVC_BUILD:-cvc.2}
 ARISRVX_BUILD=${ARISRVX_BUILD:-cvc.1}
 
