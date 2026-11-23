@@ -144,7 +144,9 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
     if not getattr(host, "checking", False):  # arisrvx check binds nothing
         # The loop is not running yet (host.run() runs it), so this binds before the relay listens,
         # and a port that cannot be bound stops the program here, with its traceback.
-        listeners = host.loop.run_until_complete(start_listeners(server.hub))
+        # On the native engine, plain NMDC uses the host's (arisrvx's, or Host(net_threads=)).
+        net = getattr(host, "net", None) if server.hub.config.transport == "engine" else None
+        listeners = host.loop.run_until_complete(start_listeners(server.hub, net=net))
     server.service.start()
     server.hub.publish()
     log.info("sublevels %s: publishing %s.server and %s; room-call: %s", __version__, NAMESPACE,

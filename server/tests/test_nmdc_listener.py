@@ -24,13 +24,26 @@ async def hub_on(config: HubConfig):
     return hub, listeners, ports
 
 
-def plain(**kw) -> HubConfig:
-    return HubConfig(nmdc_listen="127.0.0.1:0", nmdcs_listen="off", **kw)
+@pytest.fixture(params=["asyncio", "engine"])
+def transport(request):
+    """Plain NMDC on the hub's loop, and on libcvc's native engine (N2) when pycvc has it."""
+    if request.param == "engine":
+        from sublevels.nmdc.engine import available
+        if not available():
+            import os
+            if os.environ.get("SUBLEVELS_REQUIRE_ENGINE") == "1":
+                pytest.fail("this pycvc has no connection engine (SUBLEVELS_REQUIRE_ENGINE=1)")
+            pytest.skip("this pycvc has no connection engine (libcvc N2)")
+    return request.param
 
 
-def test_two_clients_chat_pm_search_and_ctm():
+def plain(transport="asyncio", **kw) -> HubConfig:
+    return HubConfig(nmdc_listen="127.0.0.1:0", nmdcs_listen="off", transport=transport, **kw)
+
+
+def test_two_clients_chat_pm_search_and_ctm(transport):
     async def go():
-        hub, listeners, ports = await hub_on(plain())
+        hub, listeners, ports = await hub_on(plain(transport))
         a, b = Client("alice"), Client("bob", mode="P")
         for c in (a, b):
             await c.connect("127.0.0.1", ports["nmdc"])
@@ -57,13 +70,15 @@ def test_two_clients_chat_pm_search_and_ctm():
     run(go())
 
 
-def test_message_too_long_closes():
+def test_message_too_long_closes(transport):
     async def go():
-        hub, listeners, ports = await hub_on(plain(limits=Limits(login_message_max=64)))
+        hub, listeners, ports = await hub_on(plain(transport, limits=Limits(login_message_max=64)))
         c = Client("x")
         await c.connect("127.0.0.1", ports["nmdc"])
         await c.read()  # $Lock
-        c.send(b"$Supports " + b"A" * 100)  # no '|' yet: the partial message is already too long
+        # No '|' yet: the partial message is already too long. The engine has one frame limit per
+        # listener (the online one, 64 KiB), not per connection, so it needs more.
+        c.send(b"$Supports " + b"A" * (100 if transport == "asyncio" else 70000))
         with pytest.raises((asyncio.IncompleteReadError, ConnectionError)):
             while True:
                 await c.read()
@@ -73,14 +88,24 @@ def test_message_too_long_closes():
     run(go())
 
 
-def test_slow_reader_is_closed():
+def test_slow_reader_is_closed(transport):
     async def go():
-        hub, listeners, ports = await hub_on(plain(limits=Limits(output_queue_max=2048)))
+        hub, listeners, ports = await hub_on(plain(transport,
+                                                   limits=Limits(output_queue_max=256 * 1024)))
         a = Client("alice")
         await a.connect("127.0.0.1", ports["nmdc"])
         await a.login()
         s = hub.users["alice"]
-        s.conn.write(b"x" * 4096)  # more than the queue may hold in one turn
+        # alice stops reading; the hub keeps writing until her queue passes the limit.
+        for _ in range(4096):
+            if s.state == "closed":
+                break
+            s.conn.write(b"x" * 16384)
+            await asyncio.sleep(0)
+        for _ in range(200):
+            if s.state == "closed":
+                break
+            await asyncio.sleep(0.05)
         assert s.state == "closed" and hub.counters.refusals["slow_reader"] == 1
         await listeners.close(hub)
 
