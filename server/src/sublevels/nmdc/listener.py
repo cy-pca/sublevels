@@ -207,10 +207,11 @@ class Listeners:
     servers: list = field(default_factory=list)
     tls: TlsContext | None = None
     watcher: asyncio.Task | None = None
+    engine: object = None  # the plain NMDC listener on the native engine (engine.EngineListener)
 
     def addresses(self) -> list[tuple[str, str, int]]:
         """(protocol, host, port) of each listening socket."""
-        out = []
+        out = list(self.engine.addresses()) if self.engine is not None else []
         for proto, server in self.servers:
             for sock in server.sockets or []:
                 name = sock.getsockname()
@@ -227,6 +228,8 @@ class Listeners:
                 hub.close(s, "hub shutting down")
         for _, server in self.servers:
             await server.wait_closed()
+        if self.engine is not None:
+            await self.engine.close(hub)
 
 
 async def _watch_cert(tls: TlsContext, every: float) -> None:
@@ -235,14 +238,22 @@ async def _watch_cert(tls: TlsContext, every: float) -> None:
         tls.reload_if_changed()
 
 
-async def start_listeners(hub: Hub, *, cert_check_every: float = 30.0) -> Listeners:
+async def start_listeners(hub: Hub, *, cert_check_every: float = 30.0, net=None) -> Listeners:
     """Listen as ``hub.config`` says: ``nmdc_listen`` (plain) and ``nmdcs_listen`` (TLS, with
     ``tls_cert`` and ``tls_key``); either may be "off". NMDCS without a certificate is skipped with
-    a warning."""
+    a warning. With ``transport`` "engine", plain NMDC is on the native engine (``net``, else one
+    made for this loop); NMDCS stays here."""
     cfg = hub.config
     loop = asyncio.get_running_loop()
     out = Listeners()
-    if cfg.nmdc_listen != "off":
+    if cfg.nmdc_listen != "off" and cfg.transport == "engine":
+        from .engine import available, start_engine_listener
+
+        if not available():
+            raise RuntimeError("SUBLEVELS_NMDC_TRANSPORT=engine, but this pycvc has no connection "
+                               "engine (libcvc N2, transfix/libcvc#1434)")
+        out.engine = start_engine_listener(hub, net, io_threads=cfg.net_threads)
+    elif cfg.nmdc_listen != "off":
         h, p = split_listen(cfg.nmdc_listen)
         server = await loop.create_server(lambda: NmdcConnection(hub, "nmdc", False), h, p,
                                           backlog=cfg.listen_backlog)

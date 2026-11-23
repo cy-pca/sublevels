@@ -41,6 +41,11 @@ class HubConfig:
     # The listen backlog: connections waiting for the loop to accept them. A burst of logins at
     # 6000+ users [D-7] overflows asyncio's default of 100.
     listen_backlog: int = 1024
+    # Plain NMDC's transport: "asyncio" (the hub's loop reads and writes every socket) or "engine"
+    # (libcvc's native connection engine, ARIADNE_NET_ENGINE N2: its I/O threads do, and a fan-out
+    # is one broadcast). NMDCS stays on asyncio until the engine has TLS (N3).
+    transport: str = "asyncio"
+    net_threads: int = 2  # the engine's I/O threads, when the hub makes its own (plain python)
     # Interop runs: write each connection's messages, both ways, to <capture_dir>/<id>-<protocol>
     # .log. It records what clients send in clear, passwords included: for test hubs only.
     capture_dir: str = ""
@@ -60,10 +65,25 @@ class HubConfig:
                 "SUBLEVELS_TLS_CERT": "tls_cert", "SUBLEVELS_TLS_KEY": "tls_key",
                 "SUBLEVELS_NMDCS_ADDRESS": "nmdcs_address",
                 "SUBLEVELS_IDENTITY_SALT": "identity_salt",
-                "SUBLEVELS_NMDC_CAPTURE_DIR": "capture_dir", "SUBLEVELS_ROOM": "room"}
+                "SUBLEVELS_NMDC_CAPTURE_DIR": "capture_dir", "SUBLEVELS_ROOM": "room",
+                "SUBLEVELS_NMDC_TRANSPORT": "transport"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
+        if env.get("SUBLEVELS_LIMITS"):
+            # "name=value,name=value" over the Limits defaults (soaks and tests).
+            from dataclasses import fields as _fields
+            types = {f.name: f.type for f in _fields(Limits)}
+            over = {}
+            for part in env["SUBLEVELS_LIMITS"].split(","):
+                name, _, value = part.partition("=")
+                name = name.strip()
+                if name not in types:
+                    raise ValueError(f"SUBLEVELS_LIMITS: no limit {name!r}")
+                over[name] = float(value) if types[name] in (float, "float") else int(value)
+            kw["limits"] = Limits(**over)
+        if env.get("SUBLEVELS_NET_THREADS"):
+            kw["net_threads"] = int(env["SUBLEVELS_NET_THREADS"])
         if env.get("SUBLEVELS_MAX_USERS"):
             kw["max_users"] = int(env["SUBLEVELS_MAX_USERS"])
         for var, name in {"SUBLEVELS_STRICT_KEY": "strict_key",

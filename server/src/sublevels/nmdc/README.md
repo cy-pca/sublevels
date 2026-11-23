@@ -12,10 +12,16 @@ Connect implementation, and a change here names the spec sections it implements.
 | `myinfo.py` | P2 §5 | Reading `$MyINFO`'s fields; the bytes are kept verbatim |
 | `hub.py` | P2, P3, P4, P5 | The login state machine, the user list, chat, private messages, the bot and its `+help`/`+motd`/`+rules`, search and `$SR` routing, `$ConnectToMe`/`$RevConnectToMe` |
 | `listener.py` | P1 §1, P7 §1 | The asyncio listeners: NMDC (411) and NMDCS (4111, TLS 1.2+, certificate reloaded on change) |
+| `engine.py` | P1 §1 | Plain NMDC on libcvc's native connection engine (ARIADNE_NET_ENGINE N2): `SUBLEVELS_NMDC_TRANSPORT=engine` |
 | `counters.py` | D14 | The counters, in memory; `Hub.stats()` adds the live values |
 | `config.py` | | `HubConfig`, from `SUBLEVELS_*` variables |
 
-The hub runs on the arisrvx script loop with the HTTP API and the room-call exports. It knows a
+The hub runs on the arisrvx script loop with the HTTP API and the room-call exports. Plain NMDC
+has two transports behind one seam: the loop's own asyncio sockets (the default), or libcvc's
+native connection engine (`SUBLEVELS_NMDC_TRANSPORT=engine`), whose I/O threads split input on
+`|`, queue output and write it. Every fan-out is a send to one of the hub's groups (`all`,
+`hello`, `search`, `search_active`, `ops`, `ops_userip`): on the engine, one `broadcast()` for the
+group, however large. NMDCS stays on asyncio until the engine has TLS (N3). The hub knows a
 connection only by `write()` and `close()`, so its tests (`server/tests/test_nmdc_p*.py`) run
 without sockets; `test_nmdc_listener.py` runs it on real ones.
 

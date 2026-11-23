@@ -35,6 +35,13 @@ log = logging.getLogger("sublevels.nmdc")
 LOCK, NICK, PASS, INFO, ONLINE, CLOSED = "lock", "nick", "pass", "info", "online", "closed"
 
 HUB_SUPPORTS = "NoGetINFO NoHello UserIP2 BotList HubTopic"
+
+# Fan-out groups: every online user; those that want $Hello (no NoHello); those that receive
+# active searches (not ChatOnly) and passive ones (active or unknown mode, not ChatOnly); the
+# operators, and those of them that receive $UserIP for others (UserIP2).
+ALL, HELLO, SEARCH, SEARCH_ACTIVE, OPS, OPS_USERIP = (
+    "all", "hello", "search", "search_active", "ops", "ops_userip")
+GROUPS = (ALL, HELLO, SEARCH, SEARCH_ACTIVE, OPS, OPS_USERIP)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _NICK_BANNED = set(" $|<>")
 _TTH = re.compile(r"TTH:[A-Z2-7]{39}")
@@ -101,7 +108,7 @@ class Session:
                  "identity", "connected_at", "online_at", "want_nicklist", "bad_lines",
                  "malformed", "received", "chat_rate", "pm_rate", "search_rate", "search_notice",
                  "last_search", "sr_sent", "ctm_rate", "ctm_remote", "bytes_in", "bytes_out",
-                 "close_reason", "login_timer")
+                 "close_reason", "login_timer", "fanout", "groups")
 
     def __init__(self, sid: int, conn: Conn, ip: str, port: int, protocol: str, tls: bool,
                  now: float, limits):
@@ -143,6 +150,10 @@ class Session:
         self.bytes_out = 0
         self.close_reason = ""
         self.login_timer = None
+        # The connection's fan-out when the hub's loop does not write it itself (the native
+        # engine's, which keeps groups of its own), or None; and the fan-out groups it is in.
+        self.fanout = getattr(conn, "fanout", None)
+        self.groups: set[str] = set()
 
     @property
     def mode(self) -> str:
@@ -181,6 +192,11 @@ class Hub:
         self._bad_pass: dict[str, Window] = {}  # identity -> failures
         self.keyprint = ""  # the NMDCS certificate's (P7 §1), once the listener has loaded it
         self.bridge = None  # the room bridge (sublevels.bridge.RoomBridge), when the host has one
+        # Fan-out groups (see _regroup): every member, and the members on the hub's own loop,
+        # which it writes to itself. Members on an engine get one broadcast() for the group.
+        self.members: dict[str, set[Session]] = {g: set() for g in GROUPS}
+        self.loop_members: dict[str, set[Session]] = {g: set() for g in GROUPS}
+        self.engines: list = []  # the transports with groups of their own (the native engine)
         bot = self.config.bot_nick
         self.bot_key = nick_key(bot)
         self.bot_info = self._enc(f"$MyINFO $ALL {bot} {escape(self.config.bot_description)}$ $"
@@ -206,20 +222,57 @@ class Hub:
     def send(self, s: Session, text: str) -> None:
         self._write(s, self._enc(text))
 
-    def _fan(self, data: bytes, targets) -> int:
-        """Write the same bytes to every target; returns how many got them."""
-        n = 0
-        for u in targets:
-            if u.state != CLOSED:
-                u.bytes_out += len(data)
+    # -- fan-out groups ----------------------------------------------------------------------------
+
+    def _want_groups(self, s: Session) -> set[str]:
+        """The groups an online user belongs in, from its features and mode."""
+        g = {ALL}
+        if "NoHello" not in s.supports:
+            g.add(HELLO)
+        if "ChatOnly" not in s.supports:
+            g.add(SEARCH)  # active searches (P4 §1)
+            if s.mode in (mi.ACTIVE, mi.UNKNOWN):
+                g.add(SEARCH_ACTIVE)  # passive searches go only to them
+        if s.is_op:
+            g.add(OPS)
+            if "UserIP2" in s.supports:
+                g.add(OPS_USERIP)
+        return g
+
+    def _regroup(self, s: Session) -> None:
+        """Bring ``s``'s group memberships to what it should have now (none once it is offline)."""
+        want = self._want_groups(s) if s.state == ONLINE else set()
+        for g in s.groups - want:
+            self.members[g].discard(s)
+            self.loop_members[g].discard(s)
+            if s.fanout is not None:
+                s.fanout.leave(s, g)
+        for g in want - s.groups:
+            self.members[g].add(s)
+            if s.fanout is None:
+                self.loop_members[g].add(s)
+            else:
+                s.fanout.join(s, g)
+        s.groups = want
+
+    def group_send(self, group: str, data: bytes, exclude: Session | None = None) -> int:
+        """Send the same bytes to every member of ``group`` but ``exclude``: one broadcast() to
+        each engine for its members, and a write to each of the loop's own. Returns how many."""
+        members = self.members[group]
+        n = len(members) - (1 if exclude is not None and exclude in members else 0)
+        if n <= 0:
+            return 0
+        for t in self.engines:
+            t.broadcast(group, data, exclude if exclude is not None and exclude.fanout is t
+                        else None)
+        for u in self.loop_members[group]:
+            if u is not exclude and u.state != CLOSED:
                 u.conn.write(data)
-                n += 1
         self.counters.add("bytes_out", len(data) * n)
         return n
 
     def broadcast(self, text: str, exclude: Session | None = None) -> int:
-        data = self._enc(text)
-        return self._fan(data, (u for u in self.users.values() if u is not exclude))
+        return self.group_send(ALL, self._enc(text), exclude)
 
     def bot_line(self, text: str) -> str:
         return f"<{self.config.bot_nick}> {escape(text)}|"
@@ -313,6 +366,8 @@ class Hub:
         self.counters.close(s.close_reason)
         if s.nick and self.claimed.get(s.key) is s:
             del self.claimed[s.key]
+        if s.groups:
+            self._regroup(s)  # state is CLOSED: out of every group, before the $Quit
         if was_online and self.users.get(s.key) is s:
             del self.users[s.key]
             self.broadcast(f"$Quit {s.nick}|")
@@ -508,7 +563,8 @@ class Hub:
         s.info_bytes = self._enc(s.info_text)
         s.info_due = self.clock() + self.limits.myinfo_interval
         self.counters.add("myinfo_updates")
-        self._fan(s.info_bytes, self.users.values())
+        self._regroup(s)  # the mode may have changed (P2 §5)
+        self.group_send(ALL, s.info_bytes)
         if self.bridge is not None:
             self.bridge.updated(s)
 
@@ -523,20 +579,17 @@ class Hub:
             s.login_timer.cancel()
             s.login_timer = None
         self.users[s.key] = s
+        self._regroup(s)
         self.counters.add("logins")
         if s.is_op:
             self.send(s, f"$LogedIn {s.nick}|")
         self._send_user_list(s)
         # Everyone else (P2 §6).
-        info = s.info_bytes
-        hello = self._enc(f"$Hello {s.nick}|")
-        others = [u for u in self.users.values() if u is not s]
-        self._fan(hello, (u for u in others if "NoHello" not in u.supports))
-        self._fan(info, others)
+        self.group_send(HELLO, self._enc(f"$Hello {s.nick}|"), s)
+        self.group_send(ALL, s.info_bytes, s)
         if s.is_op:
             self._send_oplist_all()
-        user_ip = self._enc(f"$UserIP {s.nick} {s.ip}|")
-        self._fan(user_ip, (u for u in others if u.is_op and "UserIP2" in u.supports))
+        self.group_send(OPS_USERIP, self._enc(f"$UserIP {s.nick} {s.ip}|"), s)
         # Hub text (P2 §7).
         if self.config.topic:
             if "HubTopic" in s.supports:
@@ -627,7 +680,7 @@ class Hub:
             self.bot_say(s, "Message not sent: you are sending too fast.")
             return
         self.counters.add("chat")
-        n = self._fan(self._enc(text), self.users.values())  # the sender too (P3 §1)
+        n = self.group_send(ALL, self._enc(text))  # the sender too (P3 §1)
         self.counters.add("chat_fanout", n)
         if self.bridge is not None:
             self.bridge.chat(s, body)
@@ -719,9 +772,7 @@ class Hub:
                 self.counters.drop("search_nick")
                 return
             out = text
-            targets = (u for u in self.users.values()
-                       if u is not s and u.mode in (mi.ACTIVE, mi.UNKNOWN)
-                       and "ChatOnly" not in u.supports)
+            group = SEARCH_ACTIVE
             self.counters.add("search_passive")
         else:
             _, colon, port = addr.rpartition(":")
@@ -731,12 +782,11 @@ class Hub:
             out = f"$Search {_address(s.ip, port)} {query}|"
             if out != text:
                 self.counters.add("search_rewritten")
-            targets = (u for u in self.users.values()
-                       if u is not s and "ChatOnly" not in u.supports)
+            group = SEARCH
             self.counters.add("search_active")
         s.last_search = now
         s.sr_sent.clear()
-        n = self._fan(self._enc(out), targets)
+        n = self.group_send(group, self._enc(out), s)
         self.counters.add("search_fanout", n)
 
     def _sr(self, s: Session, text: str) -> None:
@@ -891,6 +941,8 @@ class Hub:
             "clients": dict(clients.most_common()),
             "modes": dict(modes),
             "share": sum(u.info.share for u in self.users.values() if u.info),
+            "transport": self.config.transport,
+            **({"engine": self.engines[0].stats()} if self.engines else {}),
             **self.counters.snapshot(),
         }
 
