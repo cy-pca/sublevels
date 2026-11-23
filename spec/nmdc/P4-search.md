@@ -1,6 +1,6 @@
 # P4. Search and results
 
-Sources: [NMDC] §4.2.1, §4.4.23, §4.4.24, §4.6.2, §4.6.4, §4.6.18; [D-6], [D-7].
+Sources: [NMDC] §4.2.1, §4.4.23, §4.4.24, §4.6.2, §4.6.4, §4.6.18; [D-6], [D-7]; [CAP-ncdc-1.23.1], [CAP-airdcpp-2.14.0].
 
 ## 1. `$Search`
 
@@ -70,10 +70,25 @@ known TTH, `<hubname>` is replaced by `TTH:<hash>`. The result's path uses `\` a
   is written as an `$SR` from the native user's nick.
 - Relay-mode downloads between native users [D-6] are found by the same searches.
 
+## Captured in M1
+
+Black-box captures from M1's interop and transfer runs (2026-11-16): ncdc 1.23.1 (Ubuntu package)
+and the AirDC++ web client 2.14.0 (portable build), against the sublevels hub.
+
+- **Active searches.** `$Search 127.0.0.1:<udp> F?T?0?1?<terms>|` from both clients [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0].
+  Each wrote its own correct address, so the rewrite in §1 changed nothing. Results came back by
+  UDP.
+- **Passive searches.** `$Search Hub:ncdcC F?T?0?1?<terms>|` [CAP-ncdc-1.23.1]. Results came back through
+  the hub, as §2 describes.
+- **TTH.** Neither client sent a type-9 search for a plain query, though AirDC++ lists `TTHSearch`
+  [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0].
+- **Transfers found by search.** All five downloads in the transfer runs (active and passive, both
+  clients) were found by search and checked by SHA-256 [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0].
+
 ## To capture
 
-- Whether each target client sends TTH searches (type 9) to hubs that did not list any feature,
-  and what pattern it sends.
+- When each client sends a TTH search (type 9): for example to re-find a queued file, and with
+  which pattern.
 - Whether any target client relies on getting its own search back.
-- How each client behaves when searches are dropped silently by the rate limit.
+- How each client behaves when the rate limit drops its searches silently.
 - Whether any client sends `$Search` with a host name instead of an IP address.

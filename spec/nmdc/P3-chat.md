@@ -1,6 +1,6 @@
 # P3. Main chat and private messages
 
-Sources: [NMDC] §4.1.1, §4.4.1, §4.4.2, §4.5.12, §4.5.11 (DND); [D-9].
+Sources: [NMDC] §4.1.1, §4.4.1, §4.4.2, §4.5.12, §4.5.11 (DND); [D-9]; [CAP-ncdc-1.23.1], [CAP-airdcpp-2.14.0].
 
 ## 1. Main chat
 
@@ -66,9 +66,22 @@ built (P2 §2).
   users appear in NMDC chat with a prefix that marks them as bridged, so their nicks cannot be
   confused with hub users'. The prefix is decided with the bridge.
 
+## Captured in M1
+
+Black-box captures from M1's interop and transfer runs (2026-11-16): ncdc 1.23.1 (Ubuntu package)
+and the AirDC++ web client 2.14.0 (portable build), against the sublevels hub.
+
+- **`/me`.** Both clients send it literally as main chat, `<nick> /me text|` [CAP-ncdc-1.23.1] [CAP-airdcpp-2.14.0]. The hub
+  forwards it unchanged. A native client that shows it as an action does so itself.
+- **Private messages.** A `$To` that arrives while the user is online opens a private-message tab
+  named after the sender, in ncdc (`~observer` for the test's observer) [CAP-ncdc-1.23.1] and in AirDC++
+  (`/private_chat`) [CAP-airdcpp-2.14.0].
+- **Away replies.** AirDC++'s web client, which reports itself away, answers a private message
+  with an automatic reply [CAP-airdcpp-2.14.0]. The hub's rate limit (§2) counts it like any other.
+
 ## To capture
 
-- How each target client sends `/me`: as `<nick> /me text`, `* nick text`, or not at all.
+- How DC++ and EiskaltDC++ send `/me`.
 - Whether any target client relies on the hub not echoing main chat back to the sender.
 - Whether each client opens a private-message window for a `$To` that arrives during login.
 - How each client shows bot private messages from a nick in `$OpList` and `$BotList`.
