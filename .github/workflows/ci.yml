@@ -13,6 +13,8 @@ name: ci
 #           TX.WTF mode (server/ci/smoke-package.sh).
 #   interop-ncdc  ncdc (Ubuntu's package) as a black box against the hub (server/interop/).
 #   interop-airdcpp  the AirDC++ web client's portable release, through its documented HTTP API.
+#   interop-eiskaltdcpp  EiskaltDC++ through its JSON-lines driver (cvcpkg eiskaltdcpp-py-cp312),
+#           over NMDC and NMDCS, with an operator's redirect and kick (P6).
 #   airdcpp-webclient  cvcpkg's airdcpp-webclient package (its recipe is in
 #           cy-pca/airdcpp-webclient), for the transfers jobs.
 #   transfers  ncdc and that AirDC++ download each other's files through the hub, over NMDC and
@@ -26,8 +28,9 @@ name: ci
 # (SUBLEVELS_NMDC_TRANSPORT, set on every leg): asyncio, and libcvc's native connection engine
 # (pycvc 4.0.9 from cvcpkg). The default, auto, is the engine where pycvc has it. NMDCS stays on asyncio either way until the engine has TLS (libcvc N3), so a leg's
 # engine coverage is its plain-NMDC connections: interop-ncdc's ncdcA and ncdcC (ncdcB is NMDCS),
-# interop-airdcpp and transfers (nmdc) in full, and in transfers (nmdcs) only the plain session the
-# TLS-only hub turns away. The arisrvx job runs the socket tests on both and smokes the engine as
+# interop-airdcpp, interop-eiskaltdcpp (nmdc) and transfers (nmdc) in full, and in
+# interop-eiskaltdcpp (nmdcs) the redirect to the plain address, and in transfers (nmdcs) only
+# the plain session the TLS-only hub turns away. The arisrvx job runs the socket tests on both and smokes the engine as
 # arisrvx's own (host.net).
 #
 # GitHub-hosted runners only: this repository is public, and a pull request's workflows must
@@ -210,6 +213,54 @@ jobs:
         with:
           name: interop-airdcpp-${{ matrix.transport }}
           path: ${{ runner.temp }}/interop
+          retention-days: 14
+
+  interop-eiskaltdcpp:
+    # EiskaltDC++ 2.6.2 as a black box, through eiskaltdcpp-interop (the JSON-lines driver from
+    # transfix/eiskaltdcpp-py, contract 1, cvcpkg's eiskaltdcpp-py-cp312;
+    # server/interop/eiskaltdcpp_interop.py): an active and a passive client log in, see each
+    # other, chat and send private messages both ways, and download each other's file by search
+    # (SHA-256 checked); over NMDCS a wrong keyprint is refused. An operator (the repository's test
+    # client, logging in with a password) redirects one with $OpForceMove and kicks the other
+    # (P6); what EiskaltDC++ shows goes in the job summary.
+    name: interop-eiskaltdcpp (${{ matrix.hub }}, ${{ matrix.transport }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        hub: [nmdc, nmdcs]
+        transport: [asyncio, engine]
+    env:
+      SUBLEVELS_NMDC_TRANSPORT: ${{ matrix.transport }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/setup-cvcpkg
+      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+        if: matrix.transport == 'engine'
+        run: |
+          bash server/ci/install.sh ~/sublevels-ci
+          echo "PY=$HOME/sublevels-ci/deps/bin/python3.12" >> "$GITHUB_ENV"
+      - name: EiskaltDC++ and its driver (cvcpkg eiskaltdcpp-py-cp312)
+        run: |
+          cvcpkg install eiskaltdcpp-py-cp312 --prefix "$RUNNER_TEMP/eiskalt"
+          "$RUNNER_TEMP/eiskalt/bin/eiskaltdcpp-interop" --version
+      - name: EiskaltDC++ interop
+        run: |
+          ${PY:-python} server/interop/eiskaltdcpp_interop.py ${{ matrix.hub == 'nmdcs' && '--tls' || '' }} \
+            --driver "$RUNNER_TEMP/eiskalt/bin/eiskaltdcpp-interop" --out "$RUNNER_TEMP/eiskalt-out"
+      - name: Findings
+        if: always()
+        run: cat "$RUNNER_TEMP/eiskalt-out/findings.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the captures and the driver logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-eiskaltdcpp-${{ matrix.hub }}-${{ matrix.transport }}
+          path: ${{ runner.temp }}/eiskalt-out
           retention-days: 14
 
   airdcpp-webclient:

@@ -166,7 +166,8 @@ class HubConfig:
         for var, name in {"SUBLEVELS_STRICT_KEY": "strict_key",
                           "SUBLEVELS_TLS_REQUIRED": "tls_required",
                           "SUBLEVELS_COUNTRY_PREFIX": "country_prefix",
-                          "SUBLEVELS_KICK_NOTICE_ALL": "kick_notice_all"}.items():
+                          "SUBLEVELS_KICK_NOTICE_ALL": "kick_notice_all",
+                          "SUBLEVELS_PASSWORD_REQUIRES_TLS": "password_requires_tls"}.items():
             if env.get(var):
                 kw[name] = env[var].strip().lower() in ("1", "true", "yes", "on")
         if env.get("SUBLEVELS_RESERVED_NICKS"):
