@@ -107,6 +107,11 @@ def build(host: Any = None, config: HubConfig | None = None) -> Server:
     else:
         log.warning("this host has no bridged-users API (arisrvx and pycvc before 4.0.2): NMDC "
                     "users are not put in the conference room")
+    from .hublist.service import Hublist, HublistConfig
+
+    hcfg = HublistConfig.from_env(data_dir=hub.config.data_dir)
+    if hcfg.enabled:
+        service.hublist = Hublist(hcfg, geo=hub.geo.lookup)
     service.admin_token = admin_token()
     return Server(host, service, api.create_app(service), hub, rpc.register(service))
 
@@ -185,6 +190,8 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
         listeners = host.loop.run_until_complete(start_listeners(server.hub, net=net))
         server.service.hublists.start(host.loop)
         server.hub.analytics.start(host.loop.call_later)
+        if server.service.hublist is not None:
+            host.loop.run_until_complete(server.service.hublist.start())
     server.service.start()
     server.hub.publish()
     log.info("sublevels %s: publishing %s.server and %s; room-call: %s", __version__, NAMESPACE,
@@ -197,6 +204,8 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
             host.loop.run_until_complete(server.service.hublists.close())
             host.loop.run_until_complete(listeners.close(server.hub))
         server.hub.analytics.stop()
+        if server.service.hublist is not None and not host.loop.is_closed():
+            host.loop.run_until_complete(server.service.hublist.close())
         if server.hub.connlog is not None:
             server.hub.connlog.flush()
         server.service.stop()
