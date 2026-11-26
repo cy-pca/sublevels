@@ -90,6 +90,7 @@ def build(host: Any = None, config: HubConfig | None = None) -> Server:
         accounts = FileAccounts(path)
         log.info("accounts: %s (%d)", path, len(accounts.accounts))
     hub = Hub(cfg, tree=host, accounts=accounts, call_later=host.loop.call_later)
+    hub.check_ready()
     service.hub = hub
     service.hublists = Publisher(hub)
     url = connlog_url(hub.config)

@@ -119,7 +119,8 @@ class Session:
                  "malformed", "received", "chat_rate", "pm_rate", "search_rate", "search_notice",
                  "last_search", "sr_sent", "ctm_rate", "ctm_remote", "bytes_in", "bytes_out",
                  "close_reason", "login_timer", "fanout", "groups", "pinger", "pinger_timer",
-                 "visit", "location", "account", "opened_wall", "role", "last_pm")
+                 "visit", "location", "account", "opened_wall", "role", "last_pm",
+                 "location_refusal")
 
     def __init__(self, sid: int, conn: Conn, ip: str, port: int, protocol: str, tls: bool,
                  now: float, limits):
@@ -166,6 +167,9 @@ class Session:
         self.fanout = getattr(conn, "fanout", None)
         self.groups: set[str] = set()
         self.location = UNKNOWN  # where the address is (D11), looked up before $Lock
+        # The location policy refused it, but an exempt account may still log in (D12): the line
+        # it is sent if it does not. "" when the policy admitted it.
+        self.location_refusal = ""
         self.account = ""  # the registered nick it logged in with, if any
         self.role = "user"  # P6 §1: from its account
         self.last_pm: dict[str, tuple[float, str]] = {}  # target key -> (time, text): $Kick's reason
@@ -406,11 +410,12 @@ class Hub:
             return s
         why = self.policy.refuses(s.ip, s.location)
         if why:
-            self.bot_say(s, why)
-            self.counters.refuse("location")
-            self.close(s, f"location policy ({s.location.country or 'unknown'})")
-            self.oplog("refused_location", "hub", s.ip, why, country=s.location.country)
-            return s
+            if isinstance(self.accounts, NoAccounts):
+                self._refuse_location(s, why)  # nobody could be exempt
+                return s
+            # Held (D12): only an exempt account, with its password, gets past $ValidateNick.
+            s.location_refusal = why
+            self.counters.add("location_held")
         ban = self.bans.at_connect(s.ip, s.identity)  # P6 §4 step 1
         if ban is not None:
             self._refuse_ban(s, ban)
@@ -579,6 +584,10 @@ class Hub:
             self.close(s, f"nick refused ({why})")
             return
         registered = self.accounts.is_registered(nick)
+        if s.location_refusal and not self.policy.exempts(self.accounts, nick):
+            s.nick = nick
+            self._refuse_location(s, s.location_refusal)
+            return
         ban = self.bans.at_nick(nick, registered)  # P6 §4 step 2
         if ban is not None:
             s.nick = nick
@@ -626,6 +635,11 @@ class Hub:
         self.claimed[s.key] = s
         s.account = s.nick
         self._set_role(s)
+        if s.location_refusal:  # an exempt account, logged in with its password (D12)
+            self.counters.add("location_exempted")
+            self.oplog("location_exempt", "hub", s.nick, s.location_refusal, address=s.ip,
+                       country=s.location.country, role=s.role)
+            s.location_refusal = ""
         self._hello(s)
 
     def _hello(self, s: Session) -> None:
@@ -695,6 +709,9 @@ class Hub:
             self.bridge.updated(s)
 
     def _go_online(self, s: Session) -> None:
+        if s.location_refusal:  # never reached (only $MyPass clears it), but never let one in
+            self._refuse_location(s, s.location_refusal)
+            return
         if s.pinger:
             self._pinger_online(s)
             return
@@ -979,6 +996,23 @@ class Hub:
                 self.oplog("role", "accounts", u.nick, f"{old} -> {u.role}")
         if changed:
             self._send_oplist_all()
+
+    def check_ready(self) -> None:
+        """Raise ValueError if the hub would not do what its settings say: a location policy whose
+        database did not load would place no address, and so admit (or refuse) everyone. At run
+        time a file that goes missing or bad keeps the database already loaded (GeoDB)."""
+        if self.policy.on and not self.geo.status()["loaded"]:
+            raise ValueError(f"the location policy is {self.policy.mode}, but the GeoLite2 "
+                             f"database did not load from {self.config.geoip_db!r} "
+                             f"({self.geo.status()['error']})")
+
+    def _refuse_location(self, s: Session, why: str) -> None:
+        """D12: one line saying why, the close, and the operator log."""
+        self.bot_say(s, why)
+        self.counters.refuse("location")
+        self.close(s, f"location policy ({s.location.country or 'unknown'})")
+        self.oplog("refused_location", "hub", s.nick or s.ip, why, address=s.ip,
+                   country=s.location.country)
 
     def _refuse_ban(self, s: Session, ban) -> None:
         """P6 §4: one line, then the close; past three tries a minute from an address, no line."""

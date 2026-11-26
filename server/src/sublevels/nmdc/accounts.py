@@ -9,6 +9,7 @@ Passwords are stored as scrypt hashes, never in the clear. The file is managed w
 
     python -m sublevels.nmdc.accounts FILE add NICK [--role op]   # the password from stdin
     python -m sublevels.nmdc.accounts FILE role NICK admin
+    python -m sublevels.nmdc.accounts FILE exempt NICK on   # may log in from a refused location
     python -m sublevels.nmdc.accounts FILE remove NICK
     python -m sublevels.nmdc.accounts FILE list
 """
@@ -87,7 +88,8 @@ class FileAccounts:
             role = a.get("role", "user")
             if role not in ROLES or not isinstance(a.get("password"), str):
                 raise ValueError(f"{self.path}: account {nick!r}: bad role or password")
-            accounts[_key(nick)] = {"nick": nick, "password": a["password"], "role": role}
+            accounts[_key(nick)] = {"nick": nick, "password": a["password"], "role": role,
+                                    "location_exempt": bool(a.get("location_exempt", False))}
         changed = self.mtime is not None and accounts != self.accounts
         self.accounts, self.mtime = accounts, mtime
         if changed and self.on_change:
@@ -115,6 +117,12 @@ class FileAccounts:
 
     def is_operator(self, nick: str) -> bool:
         return RANK[self.role(nick)] >= RANK["op"]
+
+    def location_exempt(self, nick: str) -> bool:
+        """The account may log in from a location the policy refuses (D12)."""
+        self._fresh()
+        a = self.accounts.get(_key(nick))
+        return bool(a and a["location_exempt"])
 
 
 def _read(path: str) -> dict:
@@ -146,6 +154,9 @@ def main(argv=None) -> int:
     r = sub.add_parser("role", help="change an account's role")
     r.add_argument("nick")
     r.add_argument("role", choices=ROLES)
+    ex = sub.add_parser("exempt", help="let an account log in from a refused location (D12)")
+    ex.add_argument("nick")
+    ex.add_argument("on", choices=("on", "off"))
     rm = sub.add_parser("remove")
     rm.add_argument("nick")
     sub.add_parser("list")
@@ -155,7 +166,8 @@ def main(argv=None) -> int:
     found = next((n for n in accounts if _key(n) == _key(getattr(args, "nick", ""))), None)
     if args.cmd == "list":
         for n, acc in sorted(accounts.items()):
-            print(f"{n}\t{acc.get('role', 'user')}")
+            ex = "\tlocation-exempt" if acc.get("location_exempt") else ""
+            print(f"{n}\t{acc.get('role', 'user')}{ex}")
         return 0
     if args.cmd == "add":
         if sys.stdin.isatty():
@@ -168,12 +180,16 @@ def main(argv=None) -> int:
             return 2
         if found and found != args.nick:
             del accounts[found]
-        accounts[args.nick] = {"password": hash_password(password), "role": args.role}
+        old = accounts.get(found, {}) if found else {}
+        accounts[args.nick] = {"password": hash_password(password), "role": args.role,
+                               "location_exempt": bool(old.get("location_exempt", False))}
     elif found is None:
         print(f"no account {args.nick!r}", file=sys.stderr)
         return 1
     elif args.cmd == "role":
         accounts[found]["role"] = args.role
+    elif args.cmd == "exempt":
+        accounts[found]["location_exempt"] = args.on == "on"
     else:
         del accounts[found]
     _write(args.file, data)

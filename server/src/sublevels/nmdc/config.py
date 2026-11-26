@@ -81,6 +81,11 @@ class HubConfig:
     location_countries: tuple[str, ...] = ()
     location_exempt: tuple[str, ...] = ()
     location_unknown: str = "admit"
+    # Who may still log in from a refused location (D12): accounts with these roles, these
+    # accounts, and accounts flagged location_exempt in the accounts file. They must log in with
+    # their password; nobody else gets past $ValidateNick.
+    location_exempt_roles: tuple[str, ...] = ("op", "admin")
+    location_exempt_accounts: tuple[str, ...] = ()
     country_prefix: bool = False  # "[CC] " before descriptions in $MyINFO (D13, P2 §5)
     # The connection log (D13): a SQLAlchemy URL; "" is <data_dir>/connections.sqlite3 when there
     # is a data directory, and "off" keeps none.
@@ -137,7 +142,9 @@ class HubConfig:
                 with open(env[var], encoding="utf-8") as f:
                     kw[name] = tuple(f.read().rstrip("\n").split("\n"))
         for var, name in {"SUBLEVELS_LOCATION_COUNTRIES": "location_countries",
-                          "SUBLEVELS_LOCATION_EXEMPT": "location_exempt"}.items():
+                          "SUBLEVELS_LOCATION_EXEMPT": "location_exempt",
+                          "SUBLEVELS_LOCATION_EXEMPT_ROLES": "location_exempt_roles",
+                          "SUBLEVELS_LOCATION_EXEMPT_ACCOUNTS": "location_exempt_accounts"}.items():
             if env.get(var):
                 kw[name] = tuple(v.strip() for v in env[var].split(",") if v.strip())
         if env.get("SUBLEVELS_HUBLISTS"):

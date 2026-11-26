@@ -15,7 +15,7 @@ Connect implementation, and a change here names the spec sections it implements.
 | `engine.py` | P1 §1 | Plain NMDC on libcvc's native connection engine (ARIADNE_NET_ENGINE N2), the default where pycvc has it |
 | `hublists.py` | P9 §1, D15 | Registration with hub lists: push targets on a timer, with jitter, back-off and every result kept for `/admin/hublists` |
 | `documents.py` | P2 §7, D9 | The message of the day and the rules: configured text until an operator edits it, kept in the data directory, published for native clients |
-| `geo.py` | D11, D12 | GeoLite2 lookups (a plain function, for `@host.geolocate` later), reloaded on change; the location policy |
+| `geo.py` | D11, D12 | GeoLite2 lookups (a plain function, for `@host.geolocate` later), reloaded on change; the location policy, with operators and exempt accounts let in by password |
 | `connlog.py` | D13 | The connection log: one row per connection in SQLite (SQLAlchemy), written off the loop |
 | `accounts.py` | P6 §1 | The hub's own accounts: scrypt-hashed passwords and roles (`user`, `op`, `admin`) in a JSON file, reread when it changes, with a command to manage it |
 | `bans.py` | P6 §4 | Bans by `nick:`, `id:`, `ip:`, `net:` and `account:`, kept in the data directory, and the checks at connect, `$ValidateNick` and `$MyPass` |
