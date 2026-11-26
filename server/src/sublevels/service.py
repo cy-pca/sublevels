@@ -86,6 +86,16 @@ class Service:
             return {"registered": [], **self.admin_hublists()}
         return {"registered": await self.hublists.register_now(), **self.hublists.status()}
 
+    def analytics(self, metric: str = "", resolution: str = "10s", since: float | None = None,
+                  until: float | None = None) -> dict:
+        """D14 for operators: one metric's points, or (no metric) the metrics there are."""
+        if self.hub is None:
+            return {"metrics": []}
+        a = self.hub.analytics
+        if not metric:
+            return {"metrics": a.metrics(), "resolutions": ["10s", "1m", "1h"]}
+        return a.query(metric, resolution, since, until)
+
     def operator_call(self, principal: dict, action: str, *args) -> dict:
         """A native operator's room-call (P6 §6): the caller has the admin role (the export
         checks it), and acts under its principal's name."""
@@ -108,7 +118,10 @@ class Service:
                 return {"ok": True, "bans": ops.bans(str(args[0]))}
             if action == "info":
                 return {"ok": True, **ops.info(str(args[0]))}
-        except OpError as e:
+            if action == "analytics":
+                since = float(args[2]) if len(args) > 2 and args[2] not in ("", None) else None
+                return {"ok": True, **self.analytics(str(args[0]), str(args[1] or "10s"), since)}
+        except (OpError, ValueError) as e:
             return {"ok": False, "error": str(e)}
         return {"ok": False, "error": f"no action {action!r}"}
 

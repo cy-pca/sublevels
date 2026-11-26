@@ -184,6 +184,7 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
         net = getattr(host, "net", None) if engine else None
         listeners = host.loop.run_until_complete(start_listeners(server.hub, net=net))
         server.service.hublists.start(host.loop)
+        server.hub.analytics.start(host.loop.call_later)
     server.service.start()
     server.hub.publish()
     log.info("sublevels %s: publishing %s.server and %s; room-call: %s", __version__, NAMESPACE,
@@ -195,6 +196,7 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
         if listeners is not None and not host.loop.is_closed():
             host.loop.run_until_complete(server.service.hublists.close())
             host.loop.run_until_complete(listeners.close(server.hub))
+        server.hub.analytics.stop()
         if server.hub.connlog is not None:
             server.hub.connlog.flush()
         server.service.stop()

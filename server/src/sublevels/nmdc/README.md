@@ -20,6 +20,7 @@ Connect implementation, and a change here names the spec sections it implements.
 | `accounts.py` | P6 §1 | The hub's own accounts: scrypt-hashed passwords and roles (`user`, `op`, `admin`) in a JSON file, reread when it changes, with a command to manage it |
 | `bans.py` | P6 §4 | Bans by `nick:`, `id:`, `ip:`, `net:` and `account:`, kept in the data directory, and the checks at connect, `$ValidateNick` and `$MyPass` |
 | `operators.py` | P6 | Kick, close, redirect, ban, unban, info, topic and documents, for NMDC operators, native ones (room-call) and the admin API; the `+`/`!` commands; `$UserCommand` menus |
+| `analytics.py` | D14 | Samples every 10 s (gauges, and counter changes), rolled up by the minute and the hour, stored with the connection log; the public user-count series |
 | `counters.py` | D14 | The counters, in memory; `Hub.stats()` adds the live values |
 | `config.py` | | `HubConfig`, from `SUBLEVELS_*` variables |
 
