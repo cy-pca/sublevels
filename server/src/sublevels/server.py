@@ -30,6 +30,7 @@ from typing import Any, Sequence
 from . import NAMESPACE, __version__, api, bridge, rpc
 from . import txwtf_service as txwtf
 from .nmdc import Hub, HubConfig, start_listeners
+from .nmdc.listener import pick_transport
 from .service import Service
 
 log = logging.getLogger("sublevels.server")
@@ -144,8 +145,10 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
     if not getattr(host, "checking", False):  # arisrvx check binds nothing
         # The loop is not running yet (host.run() runs it), so this binds before the relay listens,
         # and a port that cannot be bound stops the program here, with its traceback.
-        # On the native engine, plain NMDC uses the host's (arisrvx's, or Host(net_threads=)).
-        net = getattr(host, "net", None) if server.hub.config.transport == "engine" else None
+        # On the native engine (asked for, or picked by "auto"), plain NMDC uses the host's
+        # (arisrvx's, or Host(net_threads=)).
+        engine = pick_transport(server.hub.config) == "engine"
+        net = getattr(host, "net", None) if engine else None
         listeners = host.loop.run_until_complete(start_listeners(server.hub, net=net))
     server.service.start()
     server.hub.publish()
