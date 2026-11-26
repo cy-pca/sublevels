@@ -27,6 +27,7 @@ from . import myinfo as mi
 from .codec import CodePage, escape, key_matches, make_lock
 from .config import HubConfig
 from .counters import Counters
+from .documents import Documents
 from .limits import Bucket, Rate, Window
 
 log = logging.getLogger("sublevels.nmdc")
@@ -198,6 +199,8 @@ class Hub:
         self._bad_pass: dict[str, Window] = {}  # identity -> failures
         self.keyprint = ""  # the NMDCS certificate's (P7 §1), once the listener has loaded it
         self.bridge = None  # the room bridge (sublevels.bridge.RoomBridge), when the host has one
+        self.documents = Documents({"motd": self.config.motd, "rules": self.config.rules},
+                                   self.config.data_dir)
         # Fan-out groups (see _regroup): every member, and the members on the hub's own loop,
         # which it writes to itself. Members on an engine get one broadcast() for the group.
         self.members: dict[str, set[Session]] = {g: set() for g in GROUPS}
@@ -643,7 +646,7 @@ class Hub:
             else:
                 self.send(s, f"$HubName {escape(self.config.name)} - "
                              f"{escape(self.config.topic)}|")
-        for line in self.config.motd:
+        for line in self.documents.lines("motd"):
             self.bot_say(s, line)
         self.bot_say(s, "Type +rules to read the rules, +help for the hub's commands.")
         if self.bridge is not None:
@@ -710,6 +713,13 @@ class Hub:
                   str(c.min_share), str(c.min_slots), str(c.max_hubs), f"sublevels {__version__}",
                   c.owner)
         return "$HubINFO " + "$".join(escape(f) for f in fields) + "|"
+
+    def set_document(self, name: str, text: str, by: str = "") -> dict:
+        """An operator's edit of the message of the day or the rules: stored, and published."""
+        doc = self.documents.set(name, text, by)
+        self._dirty()
+        log.info("document %s edited%s", name, f" by {by}" if by else "")
+        return doc
 
     def _oplist(self) -> str:
         ops = [self.config.bot_nick] + [u.nick for u in self.users.values() if u.is_op]
@@ -833,11 +843,9 @@ class Hub:
             for line in ("Commands:", "+help  this list", "+motd  the message of the day",
                          "+rules  the hub's rules"):
                 say(s, line)
-        elif word == "motd":
-            for line in self.config.motd:
-                say(s, line)
-        elif word == "rules":
-            for line in self.config.rules:
+        elif word in ("motd", "rules"):
+            lines = self.documents.lines(word)
+            for line in lines or ["(none yet)"]:
                 say(s, line)
         else:
             say(s, f"No such command: {body.split(' ', 1)[0]}. Type +help.")
@@ -1028,6 +1036,7 @@ class Hub:
             "name": self.config.name, "topic": self.config.topic, "bot": self.config.bot_nick,
             "nmdcs": {"address": self.nmdcs_url(), "keyprint": self.keyprint},
             "room": self.config.room,
+            "documents": self.documents.as_tree(),
             "users": {"count": len(self.users), "list": users},
         })
 

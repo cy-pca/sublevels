@@ -24,8 +24,11 @@ class HubConfig:
     topic: str = ""
     bot_nick: str = "sublevels"
     bot_description: str = "the hub"
+    # The documents' text until an operator edits them (documents.py, D9).
     motd: tuple[str, ...] = DEFAULT_MOTD
     rules: tuple[str, ...] = DEFAULT_RULES
+    # Where the hub keeps what must outlive a restart (the edited documents); "" keeps nothing.
+    data_dir: str = ""
     codepage: str = "cp1252"  # [D-8]
     max_users: int = 10000  # online and logging in; past it, $HubIsFull
     reserved_nicks: tuple[str, ...] = ()
@@ -89,7 +92,8 @@ class HubConfig:
                 "SUBLEVELS_NMDC_CAPTURE_DIR": "capture_dir", "SUBLEVELS_ROOM": "room",
                 "SUBLEVELS_NMDC_TRANSPORT": "transport",
                 "SUBLEVELS_PUBLIC_ADDRESS": "public_address",
-                "SUBLEVELS_HUB_DESCRIPTION": "description", "SUBLEVELS_HUB_OWNER": "owner"}
+                "SUBLEVELS_HUB_DESCRIPTION": "description", "SUBLEVELS_HUB_OWNER": "owner",
+                "SUBLEVELS_DATA_DIR": "data_dir"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
@@ -107,6 +111,10 @@ class HubConfig:
             kw["limits"] = Limits(**over)
         if env.get("SUBLEVELS_NET_THREADS"):
             kw["net_threads"] = int(env["SUBLEVELS_NET_THREADS"])
+        for var, name in {"SUBLEVELS_MOTD_FILE": "motd", "SUBLEVELS_RULES_FILE": "rules"}.items():
+            if env.get(var):  # the text until an operator edits it
+                with open(env[var], encoding="utf-8") as f:
+                    kw[name] = tuple(f.read().rstrip("\n").split("\n"))
         if env.get("SUBLEVELS_HUBLISTS"):
             v = env["SUBLEVELS_HUBLISTS"].strip()
             kw["hublists"] = () if v == "off" else tuple(t.strip() for t in v.split(",")

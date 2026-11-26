@@ -49,6 +49,11 @@ The NMDC hub:
   --tls-required           refuse plain NMDC, with $ForceMove to the NMDCS address
   --hub-name NAME          the hub's name (default sublevels)
   --topic TEXT             the hub's topic
+  --data-dir DIR           where the hub keeps what outlives a restart: the edited message of
+                           the day and rules (default $XDG_DATA_HOME/sublevels, or
+                           ~/.local/share/sublevels; set SUBLEVELS_DATA_DIR= to keep nothing)
+  --motd-file FILE         the message of the day until an operator edits it
+  --rules-file FILE        the rules, likewise
 
 Hub lists (P9):
   --public-address HOST[:PORT]  where users reach the hub's plain NMDC; until it is set, the hub
@@ -101,6 +106,9 @@ while [[ $# -gt 0 ]]; do
     --tls-required) envs+=("SUBLEVELS_TLS_REQUIRED=1"); shift ;;
     --hub-name) need "$@"; envs+=("SUBLEVELS_HUB_NAME=$2"); shift 2 ;;
     --topic) need "$@"; envs+=("SUBLEVELS_HUB_TOPIC=$2"); shift 2 ;;
+    --data-dir) need "$@"; envs+=("SUBLEVELS_DATA_DIR=$2"); shift 2 ;;
+    --motd-file) need "$@"; envs+=("SUBLEVELS_MOTD_FILE=$2"); shift 2 ;;
+    --rules-file) need "$@"; envs+=("SUBLEVELS_RULES_FILE=$2"); shift 2 ;;
     --public-address) need "$@"; envs+=("SUBLEVELS_PUBLIC_ADDRESS=$2"); shift 2 ;;
     --hublists) need "$@"; envs+=("SUBLEVELS_HUBLISTS=$2"); shift 2 ;;
     --http) need "$@"; envs+=("SUBLEVELS_HTTP_LISTEN=$2"); shift 2 ;;
@@ -121,6 +129,9 @@ if [[ -n "$relay_tls" ]]; then
   relay+=(--tls-cert "$cert" --tls-key "$key")
 fi
 envs+=("SUBLEVELS_ROOM=$room")
+if [[ -z "${SUBLEVELS_DATA_DIR+set}" ]] && ! printf '%s\n' "${envs[@]}" | grep -q '^SUBLEVELS_DATA_DIR='; then
+  envs+=("SUBLEVELS_DATA_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/sublevels")
+fi
 
 if [[ "$cmd" == check ]]; then
   exec env "${envs[@]}" "$arisrvx" check "$main" --doc "$doc" "${relay[@]}" "${extra[@]}"

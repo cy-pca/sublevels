@@ -14,6 +14,7 @@ Connect implementation, and a change here names the spec sections it implements.
 | `listener.py` | P1 §1, P7 §1 | The asyncio listeners: NMDC (411) and NMDCS (4111, TLS 1.2+, certificate reloaded on change) |
 | `engine.py` | P1 §1 | Plain NMDC on libcvc's native connection engine (ARIADNE_NET_ENGINE N2), the default where pycvc has it |
 | `hublists.py` | P9 §1, D15 | Registration with hub lists: push targets on a timer, with jitter, back-off and every result kept for `/admin/hublists` |
+| `documents.py` | P2 §7, D9 | The message of the day and the rules: configured text until an operator edits it, kept in the data directory, published for native clients |
 | `counters.py` | D14 | The counters, in memory; `Hub.stats()` adds the live values |
 | `config.py` | | `HubConfig`, from `SUBLEVELS_*` variables |
 
