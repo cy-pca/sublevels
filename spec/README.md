@@ -45,7 +45,7 @@ errors; where this spec departs from it, the item says why.
 | P3 | [nmdc/P3-chat.md](nmdc/P3-chat.md): main chat and private messages | Draft (M0) |
 | P4 | [nmdc/P4-search.md](nmdc/P4-search.md): search and results | Draft (M0) |
 | P5 | [nmdc/P5-connect.md](nmdc/P5-connect.md): connection signalling | Draft (M0) |
-| P6 | Operator commands | M2 |
+| P6 | [nmdc/P6-operators.md](nmdc/P6-operators.md): operators: kicks, bans, redirects, hub commands, menus | Draft (M2) |
 | P7 | [nmdc/P7-transport.md](nmdc/P7-transport.md): TLS (M0); ZLIB (M2) | Draft (M0, TLS part) |
 | P8 | The client-to-client protocol | M4 |
 | P9 | [nmdc/P9-hublists-hub.md](nmdc/P9-hublists-hub.md): hub lists, the hub's side: push registration and pingers | Draft (M2) |
