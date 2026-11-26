@@ -19,7 +19,8 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 | `interop/ncdc_interop.py` | ncdc as a black box against the hub, with the hub's captures and findings |
 | `interop/airdcpp_interop.py` | The AirDC++ web client as a black box, through its documented HTTP API |
 | `interop/transfers.py` | ncdc and AirDC++ download each other's files through the hub, over NMDC or NMDCS |
-| `interop/soak.py` | Synthetic clients toward 6000+ (D7): memory, CPU and fan-out latency |
+| `interop/soak.py` | Synthetic clients toward 6000+ (D7): memory, CPU, fan-out latency and the broadcasts-per-second ceiling, on either transport |
+| `interop/bridge_e2e.py`, `interop/bridge_client.ari` | The room bridge end to end: an Ariadne client (arigl) and an NMDC client in the conference room, on real arisrvx |
 | `bin/sublevels` | The `sublevels` command: the relay, the hub, the HTTP API and TX.WTF in one arisrvx |
 | `src/sublevels/txwtf_service.py` | TX.WTF in this process, a separate instance, or none |
 | `src/sublevels/bridge.py` | NMDC users in the conference room; the hub's chat and the room's joined |
