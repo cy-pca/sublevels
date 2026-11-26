@@ -76,3 +76,33 @@ def test_client_reads_the_hub_and_its_user_list(harness, server):
         hub.disconnect(s)
         hub.publish()
     assert harness.connect().get_tree(hub.tree_path)["users"]["count"] == "0"
+
+
+def test_native_operator_functions_need_the_admin_role(harness, server):
+    from pycvc.ariadne.testing import CallError
+
+    with pytest.raises(CallError) as e:
+        harness.connect().call("sublevels.bans", "")
+    assert e.value.code != "not_found"  # there, but not for a plain participant
+    hub = server.hub
+    conn = Conn()
+    s = hub.connect(conn, "10.9.8.6", 4000)
+    first = bytes(conn.data).split(b"|", 1)[0]
+    from sublevels.nmdc.codec import lock_to_key
+    key = lock_to_key(first[len(b"$Lock "):].split(b" Pk=")[0])
+    for m in (b"$Supports NoHello|", b"$Key " + key + b"|", b"$ValidateNick eddie|",
+              CP.encode(myinfo("eddie"))):
+        hub.message(s, m)
+    admin = harness.client({"id": "joe", "name": "Joe", "roles": ["admin"]})
+    try:
+        info = admin.call("sublevels.info", "eddie")
+        assert info["ok"] and info["online"] and info["address"] == "10.9.8.6"
+        assert admin.call("sublevels.kick", "eddie", "from the room")["ok"]
+        assert conn.closed and b"kicked by Joe because: from the room" in bytes(conn.data)
+        assert admin.call("sublevels.kick", "eddie", "")["ok"] is False  # gone
+        r = admin.call("sublevels.ban", "ip:10.9.8.5", "1h", "test")
+        assert r["ok"]
+        assert [b["target"] for b in admin.call("sublevels.bans", "")["bans"]] == ["ip:10.9.8.5"]
+        assert admin.call("sublevels.unban", "ip:10.9.8.5")["ok"]
+    finally:
+        hub.disconnect(s)

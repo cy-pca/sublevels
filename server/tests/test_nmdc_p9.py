@@ -16,7 +16,7 @@ def world(**kw):
 def test_hub_lists_hubinfo_in_its_supports():
     w = world()
     s, conn = w.login("alice")
-    assert "$Supports NoGetINFO NoHello UserIP2 BotList HubTopic HubINFO|" in conn.messages()
+    assert "$Supports NoGetINFO NoHello UserIP2 BotList HubTopic HubINFO UserCommand|" in conn.messages()
 
 
 def test_a_pinger_is_answered_and_not_announced():

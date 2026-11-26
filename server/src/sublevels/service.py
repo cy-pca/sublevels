@@ -86,6 +86,32 @@ class Service:
             return {"registered": [], **self.admin_hublists()}
         return {"registered": await self.hublists.register_now(), **self.hublists.status()}
 
+    def operator_call(self, principal: dict, action: str, *args) -> dict:
+        """A native operator's room-call (P6 §6): the caller has the admin role (the export
+        checks it), and acts under its principal's name."""
+        from .nmdc.operators import OpError
+
+        if self.hub is None:
+            return {"ok": False, "error": "no hub"}
+        actor = str(principal.get("name") or principal.get("id") or "native operator")
+        ops = self.hub.ops
+        try:
+            if action == "kick":
+                return ops.kick(actor, "admin", str(args[0]), str(args[1]))
+            if action == "redirect":
+                return ops.redirect(actor, "admin", str(args[0]), str(args[1]), str(args[2]))
+            if action == "ban":
+                return ops.ban(actor, "admin", str(args[0]), str(args[1]), str(args[2]))
+            if action == "unban":
+                return ops.unban(actor, "admin", str(args[0]))
+            if action == "bans":
+                return {"ok": True, "bans": ops.bans(str(args[0]))}
+            if action == "info":
+                return {"ok": True, **ops.info(str(args[0]))}
+        except OpError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": f"no action {action!r}"}
+
     def ping(self, who: str = "") -> dict:
         """The answer to the ``sublevels.ping`` room-call: the server's version, and the caller's
         principal id as the relay gave it."""

@@ -36,10 +36,14 @@ class Documents:
         self.path = os.path.join(data_dir, "documents.json") if data_dir else ""
         self.docs = {n: {"text": "\n".join(defaults.get(n, ())), "updated": None, "by": ""}
                      for n in NAMES}
+        self._topic: dict | None = None  # an admin's !topic (P6 §3), kept with the documents
         if self.path and os.path.exists(self.path):
             try:
                 with open(self.path, encoding="utf-8") as f:
                     saved = json.load(f)
+                if isinstance(saved.get("topic"), dict) and \
+                        isinstance(saved["topic"].get("text"), str):
+                    self._topic = saved["topic"]
                 for n in NAMES:
                     if isinstance(saved.get(n), dict) and isinstance(saved[n].get("text"), str):
                         self.docs[n] = {"text": saved[n]["text"],
@@ -73,6 +77,13 @@ class Documents:
         self._save()
         return self.get(name)
 
+    def topic(self, default: str) -> str:
+        return self._topic["text"] if self._topic is not None else default
+
+    def set_topic(self, text: str, by: str = "") -> None:
+        self._topic = {"text": text, "updated": round(self.clock(), 3), "by": by}
+        self._save()
+
     def _save(self) -> None:
         if not self.path:
             return
@@ -80,8 +91,10 @@ class Documents:
         fd, tmp = tempfile.mkstemp(prefix=".documents.", dir=os.path.dirname(self.path))
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             # Only what operators edited: the rest follows the configured text.
-            json.dump({n: d for n, d in self.docs.items() if d["updated"] is not None}, f,
-                      indent=1, ensure_ascii=False)
+            saved = {n: d for n, d in self.docs.items() if d["updated"] is not None}
+            if self._topic is not None:
+                saved["topic"] = self._topic
+            json.dump(saved, f, indent=1, ensure_ascii=False)
         os.replace(tmp, self.path)
 
     def as_tree(self) -> dict:

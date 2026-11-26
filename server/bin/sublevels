@@ -54,6 +54,9 @@ The NMDC hub:
                            ~/.local/share/sublevels; set SUBLEVELS_DATA_DIR= to keep nothing)
   --motd-file FILE         the message of the day until an operator edits it
   --rules-file FILE        the rules, likewise
+  --accounts-file FILE     the hub's accounts and their roles, user, op or admin (P6; default
+                           <data-dir>/accounts.json); manage it with
+                           python -m sublevels.nmdc.accounts FILE add NICK --role op
   --geoip-db FILE          a GeoLite2 City database you downloaded from MaxMind (D11): countries
                            in the connection log and the admin API, and for SUBLEVELS_LOCATION_*
                            and SUBLEVELS_COUNTRY_PREFIX=1; reloaded when the file changes
@@ -113,6 +116,7 @@ while [[ $# -gt 0 ]]; do
     --motd-file) need "$@"; envs+=("SUBLEVELS_MOTD_FILE=$2"); shift 2 ;;
     --rules-file) need "$@"; envs+=("SUBLEVELS_RULES_FILE=$2"); shift 2 ;;
     --geoip-db) need "$@"; envs+=("SUBLEVELS_GEOIP_DB=$2"); shift 2 ;;
+    --accounts-file) need "$@"; envs+=("SUBLEVELS_ACCOUNTS_FILE=$2"); shift 2 ;;
     --public-address) need "$@"; envs+=("SUBLEVELS_PUBLIC_ADDRESS=$2"); shift 2 ;;
     --hublists) need "$@"; envs+=("SUBLEVELS_HUBLISTS=$2"); shift 2 ;;
     --http) need "$@"; envs+=("SUBLEVELS_HTTP_LISTEN=$2"); shift 2 ;;

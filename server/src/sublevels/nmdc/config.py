@@ -85,6 +85,12 @@ class HubConfig:
     # The connection log (D13): a SQLAlchemy URL; "" is <data_dir>/connections.sqlite3 when there
     # is a data directory, and "off" keeps none.
     connlog: str = ""
+    # Operators (P6). The hub's own accounts: a JSON file (accounts.py); "" is
+    # <data_dir>/accounts.json when that exists.
+    accounts_file: str = ""
+    op_max_ban: float = 86400.0  # the longest ban an op (not an admin) may make, in seconds
+    kick_notice_all: bool = False  # the "<op> is kicking <victim>" line to everyone, not just ops
+    kick_reconnect_block: float = 0.0  # seconds a kick bans the victim's address (0: none)
     limits: Limits = field(default_factory=Limits)
 
     def with_(self, **kw) -> "HubConfig":
@@ -107,7 +113,8 @@ class HubConfig:
                 "SUBLEVELS_HUB_DESCRIPTION": "description", "SUBLEVELS_HUB_OWNER": "owner",
                 "SUBLEVELS_DATA_DIR": "data_dir", "SUBLEVELS_GEOIP_DB": "geoip_db",
                 "SUBLEVELS_LOCATION_POLICY": "location_policy",
-                "SUBLEVELS_LOCATION_UNKNOWN": "location_unknown", "SUBLEVELS_CONNLOG": "connlog"}
+                "SUBLEVELS_LOCATION_UNKNOWN": "location_unknown", "SUBLEVELS_CONNLOG": "connlog",
+                "SUBLEVELS_ACCOUNTS_FILE": "accounts_file"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
@@ -141,13 +148,18 @@ class HubConfig:
                           "SUBLEVELS_MAX_HUBS": "max_hubs"}.items():
             if env.get(var):
                 kw[name] = int(env[var])
+        for var, name in {"SUBLEVELS_OP_MAX_BAN": "op_max_ban",
+                          "SUBLEVELS_KICK_RECONNECT_BLOCK": "kick_reconnect_block"}.items():
+            if env.get(var):
+                kw[name] = float(env[var])
         if env.get("SUBLEVELS_HUBLIST_INTERVAL"):
             kw["hublist_interval"] = float(env["SUBLEVELS_HUBLIST_INTERVAL"])
         if env.get("SUBLEVELS_MAX_USERS"):
             kw["max_users"] = int(env["SUBLEVELS_MAX_USERS"])
         for var, name in {"SUBLEVELS_STRICT_KEY": "strict_key",
                           "SUBLEVELS_TLS_REQUIRED": "tls_required",
-                          "SUBLEVELS_COUNTRY_PREFIX": "country_prefix"}.items():
+                          "SUBLEVELS_COUNTRY_PREFIX": "country_prefix",
+                          "SUBLEVELS_KICK_NOTICE_ALL": "kick_notice_all"}.items():
             if env.get(var):
                 kw[name] = env[var].strip().lower() in ("1", "true", "yes", "on")
         if env.get("SUBLEVELS_RESERVED_NICKS"):
