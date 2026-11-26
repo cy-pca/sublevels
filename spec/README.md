@@ -25,10 +25,13 @@ Every file lists the sources it was written from, by these tags.
 | [ADC-EXT] | *ADC Extensions*. https://adc.sourceforge.io/ADC-EXT.html, read 2026-11-15 |
 | [D-n] | Decision n in [docs/ROADMAP.md](../docs/ROADMAP.md) |
 | [OBS-VH] | Behaviour of the Verlihub hub (upstream source), observed by the spec writer and stated here as behaviour only |
-| [OBS-EI] | Behaviour of the EiskaltDC++ client (upstream source), observed the same way |
+| [OBS-EI] | Behaviour of the EiskaltDC++ client (upstream source), observed the same way (including how it loads XML hub lists) |
 | [CAP-ncdc-1.23.1] | Black-box captures of ncdc 1.23.1 (Ubuntu package) against the hub, from M1's interop and transfer runs, 2026-11-16 (cy-pca/sublevels#8, #10) |
 | [CAP-airdcpp-2.14.0] | Black-box captures of the AirDC++ web client 2.14.0 (portable build, driven through its documented HTTP API), from the same runs |
 | [CAP-…] | Further captures, named by client and version |
+| [OBS-GODCPP] | go-dcpp v0.26.0 (BSD-3-Clause): `hublist/autoreg` (the port-2501 registration client and server) and `hublist` (the XML list types), read by the spec writer for behaviour only |
+| [DCNF] | DCNF/Hublist's list generator (`hublist.py`), read 2026-11-26: the XML layout it writes, its column order, and how it normalises addresses |
+| [PWIAM] | hublist.pwiam.com's pages, read 2026-11-26: list URLs, the RegServer on port 2501, the web form and the pinger |
 
 [NMDC] is the base for all of `nmdc/`. It is a community reconstruction and has gaps and some
 errors; where this spec departs from it, the item says why.
@@ -45,4 +48,5 @@ errors; where this spec departs from it, the item says why.
 | P6 | Operator commands | M2 |
 | P7 | [nmdc/P7-transport.md](nmdc/P7-transport.md): TLS (M0); ZLIB (M2) | Draft (M0, TLS part) |
 | P8 | The client-to-client protocol | M4 |
-| P9 | Hub lists and pingers | M2 |
+| P9 | [nmdc/P9-hublists-hub.md](nmdc/P9-hublists-hub.md): hub lists, the hub's side: push registration and pingers | Draft (M2) |
+| P10 | [nmdc/P10-hublist-server.md](nmdc/P10-hublist-server.md): the hub list's side: registrations, the pinger, the XML list | Draft (M2b) |
