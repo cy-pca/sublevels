@@ -36,6 +36,7 @@ class Service:
         self.status = "starting"
         self.hub = None  # the NMDC hub (sublevels.nmdc.Hub), once the server makes it
         self.hublists = None  # its hub-list registrations (sublevels.nmdc.hublists.Publisher)
+        self.hublist = None  # hublist mode (sublevels.hublist.service.Hublist), when it is on
         self.admin_token = ""  # the admin API's bearer token; "" turns the admin API off
         self.txwtf = {"mode": "off", "url": ""}  # where TX.WTF is (sublevels.txwtf)
 

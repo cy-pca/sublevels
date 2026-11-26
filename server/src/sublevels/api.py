@@ -13,6 +13,11 @@
   ``GET /admin/oplog``, the operator log (P6 §4, §7). The admin API acts as an admin.
 - ``GET /admin/analytics``: the metrics there are; with ``metric`` (and ``resolution`` 10s, 1m
   or 1h, ``since``, ``until``, Unix seconds; the last hour by default), its points (D14).
+- In hublist mode (D16, P10 §4): ``GET /hublist.xml``, ``/hublist.xml.bz2`` and
+  ``/hublist-<cc>.xml.bz2``, with ``ETag`` and ``Last-Modified``; and for operators
+  ``GET /admin/hublist`` (the entries, by ``state``), ``PUT /admin/hublist/state`` (``{"address",
+  "state"}``: listed, hidden, banned...), ``DELETE /admin/hublist/entry?address=`` and
+  ``POST /admin/hublist/ping`` (``{"address"}``: ping it now).
 - ``GET /admin/hublists``: the hub-list targets, each registration's result and the pingers'
   visits (P9, D15); ``POST /admin/hublists/register`` registers with every push target now.
 
@@ -24,7 +29,10 @@ from __future__ import annotations
 
 import hmac
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException
+from email.utils import formatdate
+
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import Response
 
 from . import __version__
 from .nmdc.documents import NAMES, DocumentError
@@ -131,6 +139,72 @@ def create_app(service: Service) -> FastAPI:
             return service.analytics(metric, resolution, since, until)
         except ValueError as e:
             raise HTTPException(422, str(e))
+
+    def _hublist():
+        if service.hublist is None:
+            raise HTTPException(404, "this server is not a hub list (SUBLEVELS_HUBLIST)")
+        return service.hublist
+
+    def _list_file(name: str, request: Request) -> Response:
+        got = _hublist().lists.get(name)
+        if got is None:
+            raise HTTPException(404, f"no {name}")
+        body, etag, mtime = got
+        headers = {"ETag": etag, "Last-Modified": formatdate(mtime, usegmt=True),
+                   "Cache-Control": "public, max-age=300"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        kind = "application/x-bzip2" if name.endswith(".bz2") else "application/xml"
+        return Response(body, media_type=kind, headers=headers)
+
+    @app.get("/hublist.xml")
+    def hublist_xml(request: Request):
+        return _list_file("hublist.xml", request)
+
+    @app.get("/hublist.xml.bz2")
+    def hublist_bz2(request: Request):
+        return _list_file("hublist.xml.bz2", request)
+
+    @app.get("/hublist-{cc}.xml.bz2")
+    def hublist_country(cc: str, request: Request):
+        return _list_file(f"hublist-{cc.lower()}.xml.bz2", request)
+
+    @app.get("/admin/hublist", dependencies=[Depends(operator)])
+    def admin_hublist(state: str = "") -> dict:
+        h = _hublist()
+        return {"stats": h.stats(), "entries": h.entries(state)}
+
+    @app.put("/admin/hublist/state", dependencies=[Depends(operator)])
+    def admin_hublist_state(address: str = Body(...), state: str = Body(...)) -> dict:
+        try:
+            e = _hublist().set_state(address, state)
+        except ValueError as err:
+            raise HTTPException(422, str(err))
+        if e is None:
+            raise HTTPException(404, f"no entry {address!r}")
+        return e
+
+    @app.delete("/admin/hublist/entry", dependencies=[Depends(operator)])
+    def admin_hublist_delete(address: str) -> dict:
+        try:
+            if not _hublist().delete(address):
+                raise HTTPException(404, f"no entry {address!r}")
+        except ValueError as err:
+            raise HTTPException(422, str(err))
+        return {"ok": True}
+
+    @app.post("/admin/hublist/ping", dependencies=[Depends(operator)])
+    async def admin_hublist_ping(address: str = Body(..., embed=True)) -> dict:
+        from .hublist.store import normalise
+
+        h = _hublist()
+        try:
+            e = h.store.get(normalise(address))
+        except ValueError as err:
+            raise HTTPException(422, str(err))
+        if e is None:
+            raise HTTPException(404, f"no entry {address!r}")
+        return await h.ping_one(e) or {"busy": True}
 
     @app.get("/admin/hublists", dependencies=[Depends(operator)])
     def admin_hublists() -> dict:

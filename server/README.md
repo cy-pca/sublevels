@@ -11,6 +11,7 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 | `src/sublevels/rpc.py` | Room-call exports: `sublevels.ping` |
 | `src/sublevels/server.py` | The entry point: `python -m sublevels.server` |
 | `src/sublevels/nmdc/` | The NMDC hub: see [its README](src/sublevels/nmdc/README.md) |
+| `src/sublevels/hublist/` | Hublist mode (P10, D16): the registration server on 2501, the pinger, the entries and the XML list clients load |
 | `main.py` | arisrvx's launcher for the same entry point |
 | `share/sublevels/server.ari` | The server document: publishes the `sublevels` namespace |
 | `tests/` | pytest: the hub per spec item, the service, the API, the Host and the S7 `ServerHarness` |
