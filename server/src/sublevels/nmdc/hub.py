@@ -224,6 +224,7 @@ class Hub:
         self.topic = self.documents.topic(self.config.topic)  # an admin's !topic outlives a restart
         self.bans = Bans(self.config.data_dir)
         self.ops = Operators(self)
+        self.hublist = None  # this instance's hub list (hublist mode, D16), for +hublist
         self.analytics = Analytics(self)  # D14; sampling starts with Analytics.start()
         self.actions: deque[dict] = deque(maxlen=1000)  # the operator log, newest last (P6 §7)
         self._ban_hits: dict[str, Window] = {}  # address -> refused-by-ban attempts

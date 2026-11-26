@@ -111,7 +111,10 @@ def build(host: Any = None, config: HubConfig | None = None) -> Server:
 
     hcfg = HublistConfig.from_env(data_dir=hub.config.data_dir)
     if hcfg.enabled:
-        service.hublist = Hublist(hcfg, geo=hub.geo.lookup)
+        own = (hub.config.nmdcs_address if hub.config.tls_required and hub.listed_address()
+               else hub.listed_address())  # a TLS-only hub is listed by its nmdcs:// address
+        service.hublist = Hublist(hcfg, geo=hub.geo.lookup, tree=host, own=own)
+        hub.hublist = service.hublist  # its +hublist
     service.admin_token = admin_token()
     return Server(host, service, api.create_app(service), hub, rpc.register(service))
 
