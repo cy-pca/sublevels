@@ -35,6 +35,7 @@ class Service:
         self.started = clock()
         self.status = "starting"
         self.hub = None  # the NMDC hub (sublevels.nmdc.Hub), once the server makes it
+        self.hublists = None  # its hub-list registrations (sublevels.nmdc.hublists.Publisher)
         self.admin_token = ""  # the admin API's bearer token; "" turns the admin API off
         self.txwtf = {"mode": "off", "url": ""}  # where TX.WTF is (sublevels.txwtf)
 
@@ -72,6 +73,18 @@ class Service:
         """The D14 counters and live values, for operators."""
         return {"version": self.version, "uptime": round(self.uptime(), 3),
                 "hub": self.hub.stats() if self.hub is not None else None}
+
+    def admin_hublists(self) -> dict:
+        """The hub-list targets, each push's result, and the pingers' visits (P9, D15)."""
+        if self.hublists is None:
+            return {"enabled": False, "off": "no hub", "targets": [], "pinger_visits": []}
+        return self.hublists.status()
+
+    async def register_hublists(self) -> dict:
+        """Push to every push target now: an operator's command."""
+        if self.hublists is None or not self.hublists.enabled:
+            return {"registered": [], **self.admin_hublists()}
+        return {"registered": await self.hublists.register_now(), **self.hublists.status()}
 
     def ping(self, who: str = "") -> dict:
         """The answer to the ``sublevels.ping`` room-call: the server's version, and the caller's

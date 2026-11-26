@@ -19,7 +19,7 @@ import logging
 import re
 import secrets
 import time
-from collections import Counter
+from collections import Counter, deque
 from typing import Any, Callable, Protocol
 
 from .. import NAMESPACE, __version__
@@ -34,7 +34,7 @@ log = logging.getLogger("sublevels.nmdc")
 # Connection states (P2 §1).
 LOCK, NICK, PASS, INFO, ONLINE, CLOSED = "lock", "nick", "pass", "info", "online", "closed"
 
-HUB_SUPPORTS = "NoGetINFO NoHello UserIP2 BotList HubTopic"
+HUB_SUPPORTS = "NoGetINFO NoHello UserIP2 BotList HubTopic HubINFO"
 
 # Fan-out groups: every online user; those that want $Hello (no NoHello); those that receive
 # active searches (not ChatOnly) and passive ones (active or unknown mode, not ChatOnly); the
@@ -46,6 +46,8 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _NICK_BANNED = set(" $|<>")
 _TTH = re.compile(r"TTH:[A-Z2-7]{39}")
 _PORT = re.compile(r"(\d{1,5})([A-Za-z]*)")
+# What a pinger may not do (P9 §2): dropped.
+_PINGER_DROPS = frozenset({"$To:", "$Search", "$SR", "$ConnectToMe", "$RevConnectToMe"})
 
 
 class Conn(Protocol):
@@ -108,7 +110,8 @@ class Session:
                  "identity", "connected_at", "online_at", "want_nicklist", "bad_lines",
                  "malformed", "received", "chat_rate", "pm_rate", "search_rate", "search_notice",
                  "last_search", "sr_sent", "ctm_rate", "ctm_remote", "bytes_in", "bytes_out",
-                 "close_reason", "login_timer", "fanout", "groups")
+                 "close_reason", "login_timer", "fanout", "groups", "pinger", "pinger_timer",
+                 "visit")
 
     def __init__(self, sid: int, conn: Conn, ip: str, port: int, protocol: str, tls: bool,
                  now: float, limits):
@@ -154,6 +157,9 @@ class Session:
         # engine's, which keeps groups of its own), or None; and the fan-out groups it is in.
         self.fanout = getattr(conn, "fanout", None)
         self.groups: set[str] = set()
+        self.pinger = False  # a hub list's pinger (P9 §2): BotINFO in $Supports, or $BotINFO
+        self.pinger_timer = None
+        self.visit: dict | None = None  # its entry in Hub.visits
 
     @property
     def mode(self) -> str:
@@ -197,6 +203,10 @@ class Hub:
         self.members: dict[str, set[Session]] = {g: set() for g in GROUPS}
         self.loop_members: dict[str, set[Session]] = {g: set() for g in GROUPS}
         self.engines: list = []  # the transports with groups of their own (the native engine)
+        # Hub-list pingers online (P9 §2): not users, so in no count, list or group; and their
+        # recent visits, newest last, for the admin API.
+        self.pingers: dict[int, Session] = {}
+        self.visits: deque[dict] = deque(maxlen=200)
         bot = self.config.bot_nick
         self.bot_key = nick_key(bot)
         self.bot_info = self._enc(f"$MyINFO $ALL {bot} {escape(self.config.bot_description)}$ $"
@@ -225,7 +235,9 @@ class Hub:
     # -- fan-out groups ----------------------------------------------------------------------------
 
     def _want_groups(self, s: Session) -> set[str]:
-        """The groups an online user belongs in, from its features and mode."""
+        """The groups an online user belongs in, from its features and mode. A pinger is in none."""
+        if s.pinger:
+            return set()
         g = {ALL}
         if "NoHello" not in s.supports:
             g.add(HELLO)
@@ -307,6 +319,27 @@ class Hub:
 
     # -- connections -------------------------------------------------------------------------------
 
+    def listed_address(self) -> str:
+        """``public_address`` as ``host:port`` (port 411 when it names none) for $HubINFO and the
+        lists; "" when there is none, or it is a loopback address (P9 §2)."""
+        addr = self.config.public_address.strip()
+        if not addr:
+            return ""
+        host, sep, port = addr.rpartition(":")
+        if not sep or not port.isdigit() or host.endswith(":"):  # no port, or a bare IPv6
+            host, port = addr, "411"
+        host = host.strip("[]")
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return ""
+        except ValueError:
+            if host.lower() == "localhost":
+                return ""
+        return f"[{host}]:{port}" if _is_ipv6(host) else f"{host}:{port}"
+
+    def listed_description(self) -> str:
+        return self.config.description or self.config.topic
+
     def connect(self, conn: Conn, ip: str, port: int, protocol: str = "nmdc",
                 tls: bool = False) -> Session:
         now = self.clock()
@@ -360,9 +393,10 @@ class Hub:
     def _leave(self, s: Session) -> None:
         was_online = s.state == ONLINE
         s.state = CLOSED
-        for t in (s.login_timer, s.info_timer):
+        for t in (s.login_timer, s.info_timer, s.pinger_timer):
             if t is not None:
                 t.cancel()
+        self.pingers.pop(s.id, None)
         self.counters.close(s.close_reason)
         if s.nick and self.claimed.get(s.key) is s:
             del self.claimed[s.key]
@@ -417,11 +451,16 @@ class Hub:
             sp = text.find(" ")
             name = text[:sp] if sp >= 0 else text[:-1]
             handler = self._handlers.get(name)
+            if s.pinger and name in _PINGER_DROPS:
+                self.counters.drop("pinger")
+                return
             if handler is not None and s.state in handler[0]:
                 handler[1](self, s, text)
             return  # unknown, or not valid in this state: ignored (P1 §1, P2 §1)
         if first == "<":
-            if s.online:
+            if s.pinger:
+                self.counters.drop("pinger")
+            elif s.online:
                 self._chat(s, text)
             return
         self._malformed(s, "malformed")
@@ -435,6 +474,8 @@ class Hub:
 
     def _supports(self, s: Session, text: str) -> None:
         s.supports = frozenset(f for f in text[len("$Supports "):-1].split(" ") if f)
+        if "BotINFO" in s.supports:
+            s.pinger = True  # P9 §2
 
     def _key(self, s: Session, text: str) -> None:
         received = self._enc(text[len("$Key "):-1])
@@ -544,6 +585,8 @@ class Hub:
         if not s.online:
             self._go_online(s)
             return
+        if s.pinger:
+            return  # never announced (P9 §2)
         if text == s.info_sent:
             return  # byte-identical: not sent again (P2 §5)
         now = self.clock()
@@ -569,6 +612,9 @@ class Hub:
             self.bridge.updated(s)
 
     def _go_online(self, s: Session) -> None:
+        if s.pinger:
+            self._pinger_online(s)
+            return
         now = self.clock()
         s.state = ONLINE
         s.online_at = now
@@ -603,6 +649,67 @@ class Hub:
         if self.bridge is not None:
             self.bridge.online(s)
         self._dirty()
+
+    # -- hub-list pingers (P9 §2) ------------------------------------------------------------------
+
+    def _pinger_online(self, s: Session) -> None:
+        """A pinger's login: it gets the user list and the hub's text, as a user does, but is not
+        announced, counted or put in any group, and is closed after ``pinger_time``."""
+        s.state = ONLINE
+        s.online_at = self.clock()
+        if s.login_timer is not None:
+            s.login_timer.cancel()
+            s.login_timer = None
+        self._pinger_start(s)
+        self._send_user_list(s)
+        if self.config.topic and "HubTopic" in s.supports:
+            self.send(s, f"$HubTopic {escape(self.config.topic)}|")
+
+    def _pinger_start(self, s: Session) -> None:
+        self.pingers[s.id] = s
+        self.counters.add("pinger_visits")
+        said = s.visit["botinfo"] if s.visit else ""  # a $BotINFO before its $MyINFO
+        s.visit = {"at": round(time.time(), 3), "address": s.ip, "nick": s.nick,
+                   "protocol": s.protocol, "botinfo": said}
+        self.visits.append(s.visit)
+        s.pinger_timer = self.call_later(self.config.pinger_time,
+                                         lambda: self.close(s, "pinger time limit"))
+        log.info("hub-list pinger %s from %s", s.nick, s.ip)
+
+    def _bot_info(self, s: Session, text: str) -> None:
+        """``$BotINFO <description>|``: a hub list's pinger, answered with ``$HubINFO``."""
+        if not s.pinger:
+            s.pinger = True
+            if s.online:  # announced as a user before it said: take it back out
+                self._unannounce(s)
+                self._pinger_start(s)
+        said = text[len("$BotINFO "):-1]
+        if s.visit is not None:
+            s.visit["botinfo"] = said
+        else:
+            s.visit = {"botinfo": said}  # kept for _pinger_start
+        self.send(s, self.hub_info())
+
+    def _unannounce(self, s: Session) -> None:
+        if self.users.get(s.key) is s:
+            del self.users[s.key]
+            self._regroup(s)  # a pinger: out of every group
+            self.counters.add("logins", -1)
+            self.broadcast(f"$Quit {s.nick}|")
+            if self.bridge is not None:
+                self.bridge.offline(s)
+            if s.is_op:
+                self._send_oplist_all()
+            self._dirty()
+
+    def hub_info(self) -> str:
+        """``$HubINFO`` (P9 §2): name, address, description, max users, min share, min slots, max
+        hubs, hub type, owner."""
+        c = self.config
+        fields = (c.name, self.listed_address(), self.listed_description(), str(c.max_users),
+                  str(c.min_share), str(c.min_slots), str(c.max_hubs), f"sublevels {__version__}",
+                  c.owner)
+        return "$HubINFO " + "$".join(escape(f) for f in fields) + "|"
 
     def _oplist(self) -> str:
         ops = [self.config.bot_nick] + [u.nick for u in self.users.values() if u.is_op]
@@ -932,6 +1039,7 @@ class Hub:
         return {
             "hub": self.config.hub_id,
             "users": len(self.users),
+            "pingers": len(self.pingers),
             "nmdcs_keyprint": self.keyprint,
             "connections": dict(live),
             "tls_connections": sum(1 for s in self.sessions.values()
@@ -956,6 +1064,7 @@ Hub._handlers = {
     "$Version": (frozenset({INFO}), Hub._version),
     "$GetNickList": (frozenset({INFO, ONLINE}), Hub._get_nick_list),
     "$MyINFO": (frozenset({INFO, ONLINE}), Hub._my_info),
+    "$BotINFO": (frozenset({INFO, ONLINE}), Hub._bot_info),
     "$GetINFO": (frozenset({ONLINE}), Hub._get_info),
     "$To:": (frozenset({ONLINE}), Hub._to),
     "$Search": (frozenset({ONLINE}), Hub._search),

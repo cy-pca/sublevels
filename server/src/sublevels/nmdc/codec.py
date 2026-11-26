@@ -90,18 +90,25 @@ def make_lock() -> bytes:
     return LOCK_PREFIX + "".join(secrets.choice(_LOCK_ALPHABET) for _ in range(24)).encode()
 
 
-def lock_to_key(lock: bytes) -> bytes:
-    """The ``$Key`` for ``lock`` (its bytes before `` Pk=``), DCN-escaped (P1 §5)."""
+def lock_to_key(lock: bytes, magic: int = 5) -> bytes:
+    """The ``$Key`` for ``lock`` (its bytes before `` Pk=``), DCN-escaped (P1 §5). ``magic`` is
+    step 2's constant: 5, or for a hub list the legacy one (``legacy_magic``, P9 §1)."""
     n = len(lock)
     if n < 2:
         raise ValueError("a lock has at least two bytes")
     key = bytearray(n)
     for i in range(1, n):
         key[i] = lock[i] ^ lock[i - 1]
-    key[0] = lock[0] ^ lock[-1] ^ lock[-2] ^ 5
+    key[0] = lock[0] ^ lock[-1] ^ lock[-2] ^ (magic & 0xFF)
     for i in range(n):
         key[i] = ((key[i] << 4) & 0xF0) | (key[i] >> 4)
     return dcn_escape(bytes(key))
+
+
+def legacy_magic(port: int) -> int:
+    """[NMDC] §4.4.39's constant for hub-to-list connections, from the hub's own local port on
+    that connection: ``(p & 0xFF) + ((p >> 8) & 0xFF)``, as 8 bits (P9 §1)."""
+    return ((port & 0xFF) + ((port >> 8) & 0xFF)) & 0xFF
 
 
 def key_matches(lock: bytes, received: bytes) -> bool:

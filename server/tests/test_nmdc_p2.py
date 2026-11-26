@@ -20,7 +20,7 @@ def test_full_login_sequence():
     s, conn = w.connect()
     conn.take()
     w.send(s, f"$Supports {ALL} |", f"$Key {w.key_for(conn)}|", "$ValidateNick alice|")
-    assert conn.take() == ["$Supports NoGetINFO NoHello UserIP2 BotList HubTopic|",
+    assert conn.take() == ["$Supports NoGetINFO NoHello UserIP2 BotList HubTopic HubINFO|",
                            "$Hello alice|"]
     assert s.state == "info" and s.supports >= {"NoHello", "HubTopic"}
     w.send(s, "$Version 1,0091|", "$GetNickList|", myinfo("alice"))

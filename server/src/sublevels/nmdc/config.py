@@ -12,6 +12,8 @@ DEFAULT_MOTD = ("Welcome to this sublevels hub.",
 DEFAULT_RULES = ("1. Be civil.",
                  "2. No flooding of chat, private messages or searches.",
                  "These rules are a placeholder until the operator writes the hub's own.")
+# P9 §1: Verlihub's two push targets [OBS-VH].
+DEFAULT_HUBLISTS = ("hublist.te-home.net", "hublist.pwiam.com")
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,23 @@ class HubConfig:
     # Interop runs: write each connection's messages, both ways, to <capture_dir>/<id>-<protocol>
     # .log. It records what clients send in clear, passwords included: for test hubs only.
     capture_dir: str = ""
+    # Hub lists (P9, roadmap D15). The hub is registered only once it has a public address: the
+    # plain-NMDC address users reach it at, "host" or "host:port". Without one, nothing is pushed
+    # and $HubINFO gives no address (it never gives a loopback one).
+    public_address: str = ""
+    description: str = ""  # for lists and $HubINFO; "" uses the topic
+    owner: str = ""  # $HubINFO's owner: the operator's contact
+    # What the hub asks of users, as lists and $HubINFO advertise it. Enforcing them is the share
+    # and slot rules' (D9, later); pingers will be exempt from them (P9 §2).
+    min_share: int = 0  # bytes
+    min_slots: int = 0
+    max_hubs: int = 0
+    minshare_prefix: bool = True  # "[MINSHARE:<n>MB] " before a pushed description (P9 §1)
+    # Targets: "host[:port][;key=standard|legacy][;method=push|pinger]" (see hublists.Target).
+    hublists: tuple[str, ...] = DEFAULT_HUBLISTS
+    hublist_interval: float = 900.0  # seconds between pushes to each target
+    hublist_jitter: float = 120.0  # up to this much random delay on each
+    pinger_time: float = 60.0  # a pinger is closed this long after it logs in (P9 §2)
     limits: Limits = field(default_factory=Limits)
 
     def with_(self, **kw) -> "HubConfig":
@@ -68,7 +87,9 @@ class HubConfig:
                 "SUBLEVELS_NMDCS_ADDRESS": "nmdcs_address",
                 "SUBLEVELS_IDENTITY_SALT": "identity_salt",
                 "SUBLEVELS_NMDC_CAPTURE_DIR": "capture_dir", "SUBLEVELS_ROOM": "room",
-                "SUBLEVELS_NMDC_TRANSPORT": "transport"}
+                "SUBLEVELS_NMDC_TRANSPORT": "transport",
+                "SUBLEVELS_PUBLIC_ADDRESS": "public_address",
+                "SUBLEVELS_HUB_DESCRIPTION": "description", "SUBLEVELS_HUB_OWNER": "owner"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
@@ -86,6 +107,16 @@ class HubConfig:
             kw["limits"] = Limits(**over)
         if env.get("SUBLEVELS_NET_THREADS"):
             kw["net_threads"] = int(env["SUBLEVELS_NET_THREADS"])
+        if env.get("SUBLEVELS_HUBLISTS"):
+            v = env["SUBLEVELS_HUBLISTS"].strip()
+            kw["hublists"] = () if v == "off" else tuple(t.strip() for t in v.split(",")
+                                                        if t.strip())
+        for var, name in {"SUBLEVELS_MIN_SHARE": "min_share", "SUBLEVELS_MIN_SLOTS": "min_slots",
+                          "SUBLEVELS_MAX_HUBS": "max_hubs"}.items():
+            if env.get(var):
+                kw[name] = int(env[var])
+        if env.get("SUBLEVELS_HUBLIST_INTERVAL"):
+            kw["hublist_interval"] = float(env["SUBLEVELS_HUBLIST_INTERVAL"])
         if env.get("SUBLEVELS_MAX_USERS"):
             kw["max_users"] = int(env["SUBLEVELS_MAX_USERS"])
         for var, name in {"SUBLEVELS_STRICT_KEY": "strict_key",

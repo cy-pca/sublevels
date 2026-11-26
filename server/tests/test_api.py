@@ -58,3 +58,38 @@ def test_public_stats_shows_the_nmdcs_keyprint():
     service.hub.set_keyprint("SHA256/" + "A" * 52)
     body = TestClient(create_app(service)).get("/stats").json()
     assert body["nmdcs"]["keyprint"] == "SHA256/" + "A" * 52
+
+
+def test_admin_hublists_and_register_now():
+    import asyncio
+
+    from hublist_stub import StubList
+    from nmdc_fakes import World
+    from sublevels.nmdc import HubConfig
+    from sublevels.nmdc.hublists import Publisher
+
+    async def go():
+        stub = await StubList().start()
+        w = World(HubConfig(public_address="hub.example.org",
+                            hublists=(f"127.0.0.1:{stub.port}", "adchub.com;method=pinger")))
+        w.login("alice")
+        service = Service()
+        service.hub = w.hub
+        service.hublists = Publisher(w.hub)
+        service.admin_token = "t0ken"
+        before = service.admin_hublists()
+        after = await service.register_hublists()
+        await asyncio.sleep(0.1)
+        await stub.close()
+        return service, before, after, stub.got
+
+    service, before, after, got = asyncio.run(go())
+    assert before["enabled"] and before["address"] == "hub.example.org"
+    assert [t["method"] for t in before["targets"]] == ["push", "pinger"]
+    assert [a["outcome"] for a in after["registered"]] == ["sent"]
+    assert after["targets"][0]["last"]["outcome"] == "sent"
+    assert got[0]["users"] == "1"
+    client = TestClient(create_app(service))
+    assert client.get("/admin/hublists").status_code == 401
+    r = client.get("/admin/hublists", headers={"Authorization": "Bearer t0ken"})
+    assert r.status_code == 200 and r.json()["targets"][0]["failures"] == 0

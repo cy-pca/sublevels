@@ -30,6 +30,7 @@ from typing import Any, Sequence
 from . import NAMESPACE, __version__, api, bridge, rpc
 from . import txwtf_service as txwtf
 from .nmdc import Hub, HubConfig, start_listeners
+from .nmdc.hublists import Publisher
 from .nmdc.listener import pick_transport
 from .service import Service
 
@@ -68,6 +69,7 @@ def build(host: Any = None, config: HubConfig | None = None) -> Server:
     service = Service(host)
     hub = Hub(config or HubConfig.from_env(), tree=host, call_later=host.loop.call_later)
     service.hub = hub
+    service.hublists = Publisher(hub)
     if bridge.available(host):
         # The relay's room in arisrvx; under plain python, the hub's (SUBLEVELS_ROOM).
         bridge.RoomBridge(hub, host, getattr(host, "room", None) or hub.config.room)
@@ -150,6 +152,7 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
         engine = pick_transport(server.hub.config) == "engine"
         net = getattr(host, "net", None) if engine else None
         listeners = host.loop.run_until_complete(start_listeners(server.hub, net=net))
+        server.service.hublists.start(host.loop)
     server.service.start()
     server.hub.publish()
     log.info("sublevels %s: publishing %s.server and %s; room-call: %s", __version__, NAMESPACE,
@@ -159,6 +162,7 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
         return host.run()
     finally:
         if listeners is not None and not host.loop.is_closed():
+            host.loop.run_until_complete(server.service.hublists.close())
             host.loop.run_until_complete(listeners.close(server.hub))
         server.service.stop()
 
