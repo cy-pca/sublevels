@@ -101,10 +101,15 @@ pid=
 [[ "$rc" -eq 0 ]] || fail "arisrvx exited $rc after SIGTERM"
 if grep -q "Traceback" "$log"; then fail "a traceback in arisrvx's log"; fi
 grep -q "publishing sublevels.server" "$log" || fail "the service did not report publishing"
-# Asked for the native engine (SUBLEVELS_NMDC_TRANSPORT=engine), plain NMDC must be on it.
-if [[ "${SUBLEVELS_NMDC_TRANSPORT:-asyncio}" == engine ]]; then
-  grep -q "listening for nmdc on .* (native engine" "$log" || fail "plain NMDC is not on the native engine"
-fi
+# Plain NMDC's transport: on the native engine when asked for (engine), and by default (auto) on a
+# host that has it (SUBLEVELS_REQUIRE_ENGINE=1 says this one must); on asyncio when asked for.
+case "${SUBLEVELS_NMDC_TRANSPORT:-auto}" in
+  engine) grep -q "listening for nmdc on .* (native engine" "$log" || fail "plain NMDC is not on the native engine" ;;
+  auto) if [[ "${SUBLEVELS_REQUIRE_ENGINE:-}" == 1 ]]; then
+          grep -q "listening for nmdc on .* (native engine" "$log" || fail "the default transport did not pick the native engine"
+        fi ;;
+  asyncio) if grep -q "listening for nmdc on .* (native engine" "$log"; then fail "SUBLEVELS_NMDC_TRANSPORT=asyncio, but plain NMDC is on the engine"; fi ;;
+esac
 # A host with the bridged-users API (libcvc 4.0.2) must have started the room bridge.
 if "$arisrvx" python -c 'from pycvc.ariadne import Host; assert hasattr(Host, "room_presence")' 2>/dev/null; then
   grep -q "room bridge: NMDC users join room" "$log" || fail "this arisrvx has the bridged-users API, but the room bridge did not start"

@@ -41,10 +41,12 @@ class HubConfig:
     # The listen backlog: connections waiting for the loop to accept them. A burst of logins at
     # 6000+ users [D-7] overflows asyncio's default of 100.
     listen_backlog: int = 1024
-    # Plain NMDC's transport: "asyncio" (the hub's loop reads and writes every socket) or "engine"
-    # (libcvc's native connection engine, ARIADNE_NET_ENGINE N2: its I/O threads do, and a fan-out
-    # is one broadcast). NMDCS stays on asyncio until the engine has TLS (N3).
-    transport: str = "asyncio"
+    # Plain NMDC's transport: "engine" (libcvc's native connection engine, ARIADNE_NET_ENGINE N2:
+    # its I/O threads read and write, and a fan-out is one broadcast), "asyncio" (the hub's loop
+    # reads and writes every socket: the fallback), or "auto" (the default: the engine when this
+    # pycvc has it and no capture_dir is set, else asyncio). NMDCS stays on asyncio until the
+    # engine has TLS (N3).
+    transport: str = "auto"
     net_threads: int = 2  # the engine's I/O threads, when the hub makes its own (plain python)
     # Interop runs: write each connection's messages, both ways, to <capture_dir>/<id>-<protocol>
     # .log. It records what clients send in clear, passwords included: for test hubs only.

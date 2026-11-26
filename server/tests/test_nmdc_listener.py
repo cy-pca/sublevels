@@ -264,3 +264,19 @@ def test_tls_required_force_move_carries_the_keyprint(tmp_path):
         await listeners.close(hub)
 
     run(go())
+
+
+def test_transport_auto_picks_the_engine_where_pycvc_has_it(monkeypatch):
+    from sublevels.nmdc import engine
+    from sublevels.nmdc.listener import pick_transport
+
+    monkeypatch.setattr(engine, "available", lambda: True)
+    assert HubConfig().transport == "auto"
+    assert pick_transport(HubConfig()) == "engine"
+    assert pick_transport(HubConfig(transport="asyncio")) == "asyncio"  # the fallback setting
+    assert pick_transport(HubConfig(capture_dir="/tmp/x")) == "asyncio"  # captures are asyncio's
+    monkeypatch.setattr(engine, "available", lambda: False)
+    assert pick_transport(HubConfig()) == "asyncio"
+    assert pick_transport(HubConfig(transport="engine")) == "engine"  # start_listeners refuses it
+    with pytest.raises(ValueError):
+        pick_transport(HubConfig(transport="uvloop"))

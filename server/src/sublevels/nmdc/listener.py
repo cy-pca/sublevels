@@ -238,11 +238,28 @@ async def _watch_cert(tls: TlsContext, every: float) -> None:
         tls.reload_if_changed()
 
 
+def pick_transport(cfg) -> str:
+    """The plain-NMDC transport ``cfg.transport`` names: "auto" is the engine when this pycvc has
+    it (libcvc 4.0.9+) and no capture is asked for (the per-connection capture is the asyncio
+    listener's), else asyncio."""
+    if cfg.transport in ("asyncio", "engine"):
+        return cfg.transport
+    if cfg.transport != "auto":
+        raise ValueError(f"SUBLEVELS_NMDC_TRANSPORT: {cfg.transport!r} is not auto, engine or "
+                         "asyncio")
+    from .engine import available
+
+    if cfg.capture_dir or not available():
+        return "asyncio"
+    return "engine"
+
+
 async def start_listeners(hub: Hub, *, cert_check_every: float = 30.0, net=None) -> Listeners:
     """Listen as ``hub.config`` says: ``nmdc_listen`` (plain) and ``nmdcs_listen`` (TLS, with
     ``tls_cert`` and ``tls_key``); either may be "off". NMDCS without a certificate is skipped with
-    a warning. With ``transport`` "engine", plain NMDC is on the native engine (``net``, else one
-    made for this loop); NMDCS stays here."""
+    a warning. With ``transport`` "engine" (or "auto", resolved by ``pick_transport``), plain NMDC
+    is on the native engine (``net``, else one made for this loop); NMDCS stays here."""
+    hub.config = hub.config.with_(transport=pick_transport(hub.config))
     cfg = hub.config
     loop = asyncio.get_running_loop()
     out = Listeners()
