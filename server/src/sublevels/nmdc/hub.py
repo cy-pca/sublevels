@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import ipaddress
 import logging
+import os
 import re
 import secrets
 import time
@@ -28,6 +29,7 @@ from .codec import CodePage, escape, key_matches, make_lock
 from .config import HubConfig
 from .counters import Counters
 from .documents import Documents
+from .geo import UNKNOWN, GeoDB, LocationPolicy
 from .limits import Bucket, Rate, Window
 
 log = logging.getLogger("sublevels.nmdc")
@@ -112,7 +114,7 @@ class Session:
                  "malformed", "received", "chat_rate", "pm_rate", "search_rate", "search_notice",
                  "last_search", "sr_sent", "ctm_rate", "ctm_remote", "bytes_in", "bytes_out",
                  "close_reason", "login_timer", "fanout", "groups", "pinger", "pinger_timer",
-                 "visit")
+                 "visit", "location", "account", "opened_wall")
 
     def __init__(self, sid: int, conn: Conn, ip: str, port: int, protocol: str, tls: bool,
                  now: float, limits):
@@ -158,6 +160,9 @@ class Session:
         # engine's, which keeps groups of its own), or None; and the fan-out groups it is in.
         self.fanout = getattr(conn, "fanout", None)
         self.groups: set[str] = set()
+        self.location = UNKNOWN  # where the address is (D11), looked up before $Lock
+        self.account = ""  # the registered nick it logged in with, if any
+        self.opened_wall = time.time()
         self.pinger = False  # a hub list's pinger (P9 §2): BotINFO in $Supports, or $BotINFO
         self.pinger_timer = None
         self.visit: dict | None = None  # its entry in Hub.visits
@@ -190,7 +195,7 @@ class Hub:
         self._call_later = call_later
         self.codepage = CodePage(self.config.codepage)
         self.counters = Counters()
-        self.salt = self.config.identity_salt or secrets.token_hex(16)
+        self.salt = self.config.identity_salt or self._stored_salt()
         self.sessions: dict[int, Session] = {}  # every connection
         self.claimed: dict[str, Session] = {}  # nick key -> the session past $ValidateNick
         self.users: dict[str, Session] = {}  # nick key -> online session
@@ -199,6 +204,9 @@ class Hub:
         self._bad_pass: dict[str, Window] = {}  # identity -> failures
         self.keyprint = ""  # the NMDCS certificate's (P7 §1), once the listener has loaded it
         self.bridge = None  # the room bridge (sublevels.bridge.RoomBridge), when the host has one
+        self.geo = GeoDB(self.config.geoip_db, clock=clock)
+        self.policy = LocationPolicy.from_config(self.config)
+        self.connlog = None  # the connection log (connlog.ConnLog), when the server keeps one
         self.documents = Documents({"motd": self.config.motd, "rules": self.config.rules},
                                    self.config.data_dir)
         # Fan-out groups (see _regroup): every member, and the members on the hub's own loop,
@@ -300,9 +308,31 @@ class Hub:
         bot = self.config.bot_nick
         self.send(s, f"$To: {s.nick} From: {bot} $<{bot}> {escape(text)}|")
 
+    def _stored_salt(self) -> str:
+        """The server's salt for client ids: kept in the data directory, so ids (and the
+        connection log's records of them) stay the same across restarts; random per run
+        without one."""
+        if not self.config.data_dir:
+            return secrets.token_hex(16)
+        path = os.path.join(self.config.data_dir, "identity_salt")
+        try:
+            with open(path, encoding="ascii") as f:
+                salt = f.read().strip()
+            if salt:
+                return salt
+        except OSError:
+            pass
+        salt = secrets.token_hex(16)
+        os.makedirs(self.config.data_dir, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(salt + "\n")
+        return salt
+
     def identity_of(self, ip: str) -> str:
-        """[D-9]: an NMDC connection's identity hash, scoped to this server. M1 has only the
-        address to go on; nick, tag and share are added when bans need them (M2)."""
+        """[D-9]: an NMDC connection's client id, until the registry gives engine connections
+        theirs: the shape of the registry's address fallback, a salted hash of the address with
+        the salt per server. Every caller goes through here, so it can switch in one place."""
         return hashlib.sha256(f"{self.salt}|{ip}".encode()).hexdigest()[:16]
 
     def set_keyprint(self, keyprint: str) -> None:
@@ -351,12 +381,20 @@ class Hub:
         s.identity = self.identity_of(s.ip)
         self.sessions[s.id] = s
         self.counters.add(f"connections.{protocol}")
-        # Capacity before $Lock (P2 §2 step 1). Bans [D-9] and location policy [D-12] are M2's.
+        s.location = self.geo.lookup(s.ip)
+        # Capacity and the location policy [D-12] before $Lock (P2 §2 step 1). Bans [D-9] are
+        # P6's.
         if len(self.sessions) > self.config.max_users:
             self.bot_say(s, "This hub is full. Try again later.")
             self.send(s, "$HubIsFull|")
             self.counters.refuse("full")
             self.close(s, "full")
+            return s
+        why = self.policy.refuses(s.ip, s.location)
+        if why:
+            self.bot_say(s, why)
+            self.counters.refuse("location")
+            self.close(s, f"location policy ({s.location.country or 'unknown'})")
             return s
         if self.config.tls_required and not tls:  # P7 §1
             where = self.nmdcs_url()
@@ -400,6 +438,8 @@ class Hub:
             if t is not None:
                 t.cancel()
         self.pingers.pop(s.id, None)
+        if self.connlog is not None:
+            self.connlog.record(self.log_row(s))
         self.counters.close(s.close_reason)
         if s.nick and self.claimed.get(s.key) is s:
             del self.claimed[s.key]
@@ -555,6 +595,7 @@ class Hub:
         if old is not None and old is not s:
             self.close(old, "logged in again elsewhere")  # the user reconnecting (P2 §3)
         self.claimed[s.key] = s
+        s.account = s.nick
         s.is_op = self.accounts.is_operator(s.nick)
         self._hello(s)
 
@@ -604,9 +645,19 @@ class Hub:
         if s.online and s.info_text != s.info_sent:
             self._send_info(s)
 
+    def _info_out(self, s: Session) -> str:
+        """The $MyINFO others get: the user's, with "[CC] " before the description when the hub
+        shows countries (D13, a rewrite P2 §5 allows)."""
+        text = s.info_text
+        if self.config.country_prefix and s.location.known:
+            head = f"$MyINFO $ALL {s.nick} "
+            if text.startswith(head):
+                text = f"{head}[{s.location.country}] {text[len(head):]}"
+        return text
+
     def _send_info(self, s: Session) -> None:
         s.info_sent = s.info_text
-        s.info_bytes = self._enc(s.info_text)
+        s.info_bytes = self._enc(self._info_out(s))
         s.info_due = self.clock() + self.limits.myinfo_interval
         self.counters.add("myinfo_updates")
         self._regroup(s)  # the mode may have changed (P2 §5)
@@ -622,7 +673,7 @@ class Hub:
         s.state = ONLINE
         s.online_at = now
         s.info_sent = s.info_text
-        s.info_bytes = self._enc(s.info_text)
+        s.info_bytes = self._enc(self._info_out(s))
         s.info_due = now + self.limits.myinfo_interval
         if s.login_timer is not None:
             s.login_timer.cancel()
@@ -713,6 +764,30 @@ class Hub:
                   str(c.min_share), str(c.min_slots), str(c.max_hubs), f"sublevels {__version__}",
                   c.owner)
         return "$HubINFO " + "$".join(escape(f) for f in fields) + "|"
+
+    def log_row(self, s: Session) -> dict:
+        """``s`` as the connection log keeps it (D13)."""
+        i = s.info
+        return {"hub": self.config.hub_id, "opened_at": round(s.opened_wall, 3),
+                "closed_at": round(time.time(), 3) if s.state == CLOSED else None,
+                "nick": s.nick, "account": s.account, "client_id": s.identity, "address": s.ip,
+                "port": s.port, "country": s.location.country, "region": s.location.region,
+                "city": s.location.city, "client": i.client if i else "",
+                "version": mi.parse_tag(i.tag)[1].get("V", "") if i and i.tag else "",
+                "protocol": s.protocol, "tls": s.tls,
+                "bytes_in": s.bytes_in, "bytes_out": s.bytes_out, "pinger": s.pinger,
+                "close_reason": s.close_reason}
+
+    def connections(self, **filters) -> dict:
+        """The connection log for operators: the live connections that match, and the stored
+        rows (newest first)."""
+        live = [self.log_row(s) for s in self.sessions.values() if s.state != CLOSED]
+        for k, v in filters.items():
+            if v and k != "limit":
+                live = [r for r in live if (str(r.get(k, "")).lower() == str(v).lower())]
+        stored = self.connlog.query(**filters) if self.connlog is not None else []
+        return {"live": live, "stored": stored, "kept": self.connlog is not None,
+                "attribution": self.geo.status()["attribution"]}
 
     def set_document(self, name: str, text: str, by: str = "") -> dict:
         """An operator's edit of the message of the day or the rules: stored, and published."""
@@ -843,6 +918,8 @@ class Hub:
             for line in ("Commands:", "+help  this list", "+motd  the message of the day",
                          "+rules  the hub's rules"):
                 say(s, line)
+            if self.geo.enabled:
+                say(s, self.geo.status()["attribution"])
         elif word in ("motd", "rules"):
             lines = self.documents.lines(word)
             for line in lines or ["(none yet)"]:
@@ -1031,12 +1108,13 @@ class Hub:
             users[f"u{u.id}"] = {"nick": u.nick, "description": i.description if i else "",
                                  "client": i.client if i else "", "mode": u.mode,
                                  "share": i.share if i else 0, "protocol": u.protocol,
-                                 "op": u.is_op}
+                                 "op": u.is_op, "country": u.location.country}
         self.tree.set_tree(self.tree_path, {
             "name": self.config.name, "topic": self.config.topic, "bot": self.config.bot_nick,
             "nmdcs": {"address": self.nmdcs_url(), "keyprint": self.keyprint},
             "room": self.config.room,
             "documents": self.documents.as_tree(),
+            "geo_attribution": self.geo.status()["attribution"] or "",
             "users": {"count": len(self.users), "list": users},
         })
 
@@ -1057,6 +1135,9 @@ class Hub:
                               if s.state not in (ONLINE, CLOSED)),
             "clients": dict(clients.most_common()),
             "modes": dict(modes),
+            "countries": dict(Counter(u.location.country or "?" for u in self.users.values())
+                              .most_common()),
+            "geo": self.geo.status(),
             "share": sum(u.info.share for u in self.users.values() if u.info),
             "transport": self.config.transport,
             **({"engine": self.engines[0].stats()} if self.engines else {}),

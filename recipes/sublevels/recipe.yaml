@@ -38,6 +38,8 @@ depends:
       version: ">=4.0.2"
     - name: fastapi-cp312
     - name: uvicorn-cp312
+    - name: sqlalchemy-cp312  # the connection log (D13)
+    - name: maxminddb-cp312  # geolocation (D11)
     - name: python312
   host_tools: []
 
