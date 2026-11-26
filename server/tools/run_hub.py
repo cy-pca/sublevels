@@ -1,6 +1,7 @@
 """Run the NMDC hub alone, on plain asyncio with the standard library only (no pycvc, no arisrvx,
 no HTTP): for interop runs and the soak, where the hub is what is measured. Settings are the
-``SUBLEVELS_*`` variables (``HubConfig.from_env``). It writes ``hub.stats()`` as JSON to
+``SUBLEVELS_*`` variables (``HubConfig.from_env``), with the hub's accounts from
+``SUBLEVELS_ACCOUNTS_FILE`` when it is set. It writes ``hub.stats()`` as JSON to
 ``--stats FILE`` every second and on exit, and stops on SIGTERM or SIGINT.
 
     python tools/run_hub.py [--stats FILE]
@@ -22,7 +23,13 @@ from sublevels.nmdc import Hub, HubConfig, start_listeners  # noqa: E402
 
 
 async def main(stats_path: str) -> int:
-    hub = Hub(HubConfig.from_env())
+    cfg = HubConfig.from_env()
+    accounts = None
+    if cfg.accounts_file:
+        from sublevels.nmdc.accounts import FileAccounts
+
+        accounts = FileAccounts(cfg.accounts_file)
+    hub = Hub(cfg, accounts=accounts)
     listeners = await start_listeners(hub)
     for proto, host, port in listeners.addresses():
         print(f"listening {proto} {host} {port}", flush=True)
