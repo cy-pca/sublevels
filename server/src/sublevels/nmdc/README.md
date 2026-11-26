@@ -17,6 +17,9 @@ Connect implementation, and a change here names the spec sections it implements.
 | `documents.py` | P2 §7, D9 | The message of the day and the rules: configured text until an operator edits it, kept in the data directory, published for native clients |
 | `geo.py` | D11, D12 | GeoLite2 lookups (a plain function, for `@host.geolocate` later), reloaded on change; the location policy |
 | `connlog.py` | D13 | The connection log: one row per connection in SQLite (SQLAlchemy), written off the loop |
+| `accounts.py` | P6 §1 | The hub's own accounts: scrypt-hashed passwords and roles (`user`, `op`, `admin`) in a JSON file, reread when it changes, with a command to manage it |
+| `bans.py` | P6 §4 | Bans by `nick:`, `id:`, `ip:`, `net:` and `account:`, kept in the data directory, and the checks at connect, `$ValidateNick` and `$MyPass` |
+| `operators.py` | P6 | Kick, close, redirect, ban, unban, info, topic and documents, for NMDC operators, native ones (room-call) and the admin API; the `+`/`!` commands; `$UserCommand` menus |
 | `counters.py` | D14 | The counters, in memory; `Hub.stats()` adds the live values |
 | `config.py` | | `HubConfig`, from `SUBLEVELS_*` variables |
 

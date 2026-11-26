@@ -28,16 +28,18 @@ from . import myinfo as mi
 from .codec import CodePage, escape, key_matches, make_lock
 from .config import HubConfig
 from .counters import Counters
+from .bans import Bans, until_text
 from .documents import Documents
 from .geo import UNKNOWN, GeoDB, LocationPolicy
 from .limits import Bucket, Rate, Window
+from .operators import OpError, Operators
 
 log = logging.getLogger("sublevels.nmdc")
 
 # Connection states (P2 §1).
 LOCK, NICK, PASS, INFO, ONLINE, CLOSED = "lock", "nick", "pass", "info", "online", "closed"
 
-HUB_SUPPORTS = "NoGetINFO NoHello UserIP2 BotList HubTopic HubINFO"
+HUB_SUPPORTS = "NoGetINFO NoHello UserIP2 BotList HubTopic HubINFO UserCommand"
 
 # Fan-out groups: every online user; those that want $Hello (no NoHello); those that receive
 # active searches (not ChatOnly) and passive ones (active or unknown mode, not ChatOnly); the
@@ -60,6 +62,9 @@ class Conn(Protocol):
 
 
 class Accounts(Protocol):
+    """Registered nicks: ``role(nick)`` (``user``, ``op`` or ``admin``) is optional; without it,
+    ``is_operator`` gives ``op``."""
+
     """Registered nicks (P2 §4). M1 has none; TX.WTF accounts come in M2."""
 
     def is_registered(self, nick: str) -> bool: ...
@@ -114,7 +119,7 @@ class Session:
                  "malformed", "received", "chat_rate", "pm_rate", "search_rate", "search_notice",
                  "last_search", "sr_sent", "ctm_rate", "ctm_remote", "bytes_in", "bytes_out",
                  "close_reason", "login_timer", "fanout", "groups", "pinger", "pinger_timer",
-                 "visit", "location", "account", "opened_wall")
+                 "visit", "location", "account", "opened_wall", "role", "last_pm")
 
     def __init__(self, sid: int, conn: Conn, ip: str, port: int, protocol: str, tls: bool,
                  now: float, limits):
@@ -162,6 +167,8 @@ class Session:
         self.groups: set[str] = set()
         self.location = UNKNOWN  # where the address is (D11), looked up before $Lock
         self.account = ""  # the registered nick it logged in with, if any
+        self.role = "user"  # P6 §1: from its account
+        self.last_pm: dict[str, tuple[float, str]] = {}  # target key -> (time, text): $Kick's reason
         self.opened_wall = time.time()
         self.pinger = False  # a hub list's pinger (P9 §2): BotINFO in $Supports, or $BotINFO
         self.pinger_timer = None
@@ -209,6 +216,13 @@ class Hub:
         self.connlog = None  # the connection log (connlog.ConnLog), when the server keeps one
         self.documents = Documents({"motd": self.config.motd, "rules": self.config.rules},
                                    self.config.data_dir)
+        self.topic = self.documents.topic(self.config.topic)  # an admin's !topic outlives a restart
+        self.bans = Bans(self.config.data_dir)
+        self.ops = Operators(self)
+        self.actions: deque[dict] = deque(maxlen=1000)  # the operator log, newest last (P6 §7)
+        self._ban_hits: dict[str, Window] = {}  # address -> refused-by-ban attempts
+        if hasattr(self.accounts, "on_change"):
+            self.accounts.on_change = self.refresh_roles
         # Fan-out groups (see _regroup): every member, and the members on the hub's own loop,
         # which it writes to itself. Members on an engine get one broadcast() for the group.
         self.members: dict[str, set[Session]] = {g: set() for g in GROUPS}
@@ -371,7 +385,7 @@ class Hub:
         return f"[{host}]:{port}" if _is_ipv6(host) else f"{host}:{port}"
 
     def listed_description(self) -> str:
-        return self.config.description or self.config.topic
+        return self.config.description or self.topic
 
     def connect(self, conn: Conn, ip: str, port: int, protocol: str = "nmdc",
                 tls: bool = False) -> Session:
@@ -395,6 +409,11 @@ class Hub:
             self.bot_say(s, why)
             self.counters.refuse("location")
             self.close(s, f"location policy ({s.location.country or 'unknown'})")
+            self.oplog("refused_location", "hub", s.ip, why, country=s.location.country)
+            return s
+        ban = self.bans.at_connect(s.ip, s.identity)  # P6 §4 step 1
+        if ban is not None:
+            self._refuse_ban(s, ban)
             return s
         if self.config.tls_required and not tls:  # P7 §1
             where = self.nmdcs_url()
@@ -559,9 +578,15 @@ class Hub:
             self.counters.refuse(f"nick_{why}")
             self.close(s, f"nick refused ({why})")
             return
+        registered = self.accounts.is_registered(nick)
+        ban = self.bans.at_nick(nick, registered)  # P6 §4 step 2
+        if ban is not None:
+            s.nick = nick
+            self._refuse_ban(s, ban)
+            return
         s.nick, s.key = nick, nick_key(nick)
         self.send(s, f"$Supports {HUB_SUPPORTS}|")
-        if self.accounts.is_registered(nick):
+        if registered:
             if self.config.password_requires_tls and not s.tls:
                 where = f" at {self.nmdcs_url()}" if self.config.nmdcs_address else ""
                 self.bot_say(s, f"{nick} is registered. Log in over TLS (nmdcs://){where}: "
@@ -594,9 +619,13 @@ class Hub:
         old = self.claimed.get(s.key)
         if old is not None and old is not s:
             self.close(old, "logged in again elsewhere")  # the user reconnecting (P2 §3)
+        ban = self.bans.at_account(s.nick)  # P6 §4 step 3
+        if ban is not None:
+            self._refuse_ban(s, ban)
+            return
         self.claimed[s.key] = s
         s.account = s.nick
-        s.is_op = self.accounts.is_operator(s.nick)
+        self._set_role(s)
         self._hello(s)
 
     def _hello(self, s: Session) -> None:
@@ -691,15 +720,14 @@ class Hub:
             self._send_oplist_all()
         self.group_send(OPS_USERIP, self._enc(f"$UserIP {s.nick} {s.ip}|"), s)
         # Hub text (P2 §7).
-        if self.config.topic:
-            if "HubTopic" in s.supports:
-                self.send(s, f"$HubTopic {escape(self.config.topic)}|")
-            else:
-                self.send(s, f"$HubName {escape(self.config.name)} - "
-                             f"{escape(self.config.topic)}|")
+        if self.topic:
+            self.send(s, self._topic_line(s))
         for line in self.documents.lines("motd"):
             self.bot_say(s, line)
         self.bot_say(s, "Type +rules to read the rules, +help for the hub's commands.")
+        if "UserCommand" in s.supports:  # P6 §5
+            for line in self.ops.menus(s.role):
+                self.send(s, line)
         if self.bridge is not None:
             self.bridge.online(s)
         self._dirty()
@@ -716,8 +744,8 @@ class Hub:
             s.login_timer = None
         self._pinger_start(s)
         self._send_user_list(s)
-        if self.config.topic and "HubTopic" in s.supports:
-            self.send(s, f"$HubTopic {escape(self.config.topic)}|")
+        if self.topic and "HubTopic" in s.supports:
+            self.send(s, f"$HubTopic {escape(self.topic)}|")
 
     def _pinger_start(self, s: Session) -> None:
         self.pingers[s.id] = s
@@ -909,23 +937,135 @@ class Hub:
             self.bot_pm(s, "Message not sent: you are sending too fast.")
             return
         self.counters.add("pm")
+        if s.is_op:  # the reason a $Kick that follows it gives (P6 §2)
+            s.last_pm[u.key] = (self.clock(), body)
+            if len(s.last_pm) > 64:
+                s.last_pm.pop(next(iter(s.last_pm)))
         self.send(u, text)
 
     def _command(self, s: Session, body: str, private: bool) -> None:
-        say = self.bot_pm if private else self.bot_say
-        word = body.split(" ", 1)[0][1:].lower()
-        if word == "help":
-            for line in ("Commands:", "+help  this list", "+motd  the message of the day",
-                         "+rules  the hub's rules"):
-                say(s, line)
-            if self.geo.enabled:
-                say(s, self.geo.status()["attribution"])
-        elif word in ("motd", "rules"):
-            lines = self.documents.lines(word)
-            for line in lines or ["(none yet)"]:
-                say(s, line)
+        self.ops.command(s, body, private)  # P6 §3
+
+    # -- operators (P6) ----------------------------------------------------------------------------
+
+    def _set_role(self, s: Session) -> None:
+        role_of = getattr(self.accounts, "role", None)
+        if role_of is not None:
+            s.role = role_of(s.nick)
         else:
-            say(s, f"No such command: {body.split(' ', 1)[0]}. Type +help.")
+            s.role = "op" if self.accounts.is_operator(s.nick) else "user"
+        s.is_op = s.role in ("op", "admin")
+
+    def refresh_roles(self) -> None:
+        """The accounts changed: online users get their new roles, and, if one changed, the
+        operator list and their menus again (P6 §5)."""
+        changed = False
+        for u in list(self.users.values()):
+            if not u.account:
+                continue
+            old = u.role
+            if not self.accounts.is_registered(u.nick):
+                u.role, u.is_op = "user", False
+            else:
+                self._set_role(u)
+            if u.role != old:
+                changed = True
+                self._regroup(u)
+                if u.is_op and old == "user":
+                    self.send(u, f"$LogedIn {u.nick}|")
+                if "UserCommand" in u.supports:
+                    for line in self.ops.menus(u.role):
+                        self.send(u, line)
+                self.oplog("role", "accounts", u.nick, f"{old} -> {u.role}")
+        if changed:
+            self._send_oplist_all()
+
+    def _refuse_ban(self, s: Session, ban) -> None:
+        """P6 §4: one line, then the close; past three tries a minute from an address, no line."""
+        now = self.clock()
+        w = self._ban_hits.get(s.ip)
+        if w is None:
+            if len(self._ban_hits) > 4096:
+                self._ban_hits.clear()
+            w = self._ban_hits[s.ip] = Window(3, 60.0)
+        if w.allow(now):
+            self.bot_say(s, f"You are banned {until_text(ban)} because: {ban.reason}")
+        self.counters.refuse("banned")
+        self.close(s, f"banned (#{ban.id} {ban.target})")
+        self.oplog("refused_ban", "hub", s.nick or s.ip, ban.reason, ban=ban.id, address=s.ip)
+
+    def oplog(self, action: str, actor: str, target: str, reason: str = "", *,
+              duration: float | None = None, **extra) -> dict:
+        """P6 §7: one operator action, or a refusal by ban or location policy."""
+        entry = {"at": round(time.time(), 3), "hub": self.config.hub_id, "action": action,
+                 "actor": actor, "target": target, "reason": reason, "duration": duration,
+                 "extra": extra}
+        self.actions.append(entry)
+        self.counters.add(f"op_{action}")
+        if self.connlog is not None:
+            self.connlog.record_action(entry)
+        if not action.startswith("refused_"):
+            log.info("operator %s: %s %s%s", actor, action, target,
+                     f" ({reason})" if reason else "")
+        return entry
+
+    def _topic_line(self, s: Session) -> str:
+        if "HubTopic" in s.supports:
+            return f"$HubTopic {escape(self.topic)}|"
+        return f"$HubName {escape(self.config.name)} - {escape(self.topic)}|"
+
+    def set_topic(self, text: str) -> None:
+        """An admin's !topic: kept, and sent to everyone (P6 §3)."""
+        self.topic = text
+        self.documents.set_topic(text)
+        for u in self.users.values():
+            self.send(u, self._topic_line(u) if text else f"$HubName {escape(self.config.name)}|")
+        self._dirty()
+
+    def _op_command(self, s: Session, text: str, silent: bool) -> None:
+        """``$Kick <victim>|`` and ``$Close <victim>|`` (P6 §2)."""
+        name = "$Close " if silent else "$Kick "
+        victim = text[len(name):-1].strip()
+        if not s.is_op:
+            self.counters.drop("kick_not_op")
+            self.bot_say(s, "You are not an operator.")
+            return
+        reason = ""
+        last = s.last_pm.get(nick_key(victim))
+        if last is not None and self.clock() - last[0] <= 10.0:
+            from .codec import unescape
+            reason = unescape(last[1])
+        try:
+            self.ops.kick(s.nick, s.role, victim, reason, silent=silent)
+        except OpError as e:
+            self.bot_say(s, str(e))
+
+    def _kick(self, s: Session, text: str) -> None:
+        self._op_command(s, text, silent=False)
+
+    def _close_cmd(self, s: Session, text: str) -> None:
+        self._op_command(s, text, silent=True)
+
+    def _op_force_move(self, s: Session, text: str) -> None:
+        """``$OpForceMove $Who:<victim>$Where:<address>$Msg:<reason>|`` (P6 §2)."""
+        if not s.is_op:
+            self.counters.drop("kick_not_op")
+            self.bot_say(s, "You are not an operator.")
+            return
+        fields = {}
+        for part in text[len("$OpForceMove "):-1].split("$"):
+            k, sep, v = part.partition(":")
+            if sep:
+                fields[k] = v
+        if not fields.get("Who") or not fields.get("Where"):
+            self._malformed(s, "bad_opforcemove")
+            return
+        from .codec import unescape
+        try:
+            self.ops.redirect(s.nick, s.role, fields["Who"], unescape(fields["Where"]),
+                              unescape(fields.get("Msg", "")))
+        except OpError as e:
+            self.bot_say(s, str(e))
 
     # -- search (P4) -------------------------------------------------------------------------------
 
@@ -1110,7 +1250,7 @@ class Hub:
                                  "share": i.share if i else 0, "protocol": u.protocol,
                                  "op": u.is_op, "country": u.location.country}
         self.tree.set_tree(self.tree_path, {
-            "name": self.config.name, "topic": self.config.topic, "bot": self.config.bot_nick,
+            "name": self.config.name, "topic": self.topic, "bot": self.config.bot_nick,
             "nmdcs": {"address": self.nmdcs_url(), "keyprint": self.keyprint},
             "room": self.config.room,
             "documents": self.documents.as_tree(),
@@ -1127,6 +1267,7 @@ class Hub:
             "hub": self.config.hub_id,
             "users": len(self.users),
             "pingers": len(self.pingers),
+            "bans": len(self.bans.in_force()),
             "nmdcs_keyprint": self.keyprint,
             "connections": dict(live),
             "tls_connections": sum(1 for s in self.sessions.values()
@@ -1155,6 +1296,9 @@ Hub._handlers = {
     "$GetNickList": (frozenset({INFO, ONLINE}), Hub._get_nick_list),
     "$MyINFO": (frozenset({INFO, ONLINE}), Hub._my_info),
     "$BotINFO": (frozenset({INFO, ONLINE}), Hub._bot_info),
+    "$Kick": (frozenset({ONLINE}), Hub._kick),
+    "$Close": (frozenset({ONLINE}), Hub._close_cmd),
+    "$OpForceMove": (frozenset({ONLINE}), Hub._op_force_move),
     "$GetINFO": (frozenset({ONLINE}), Hub._get_info),
     "$To:": (frozenset({ONLINE}), Hub._to),
     "$Search": (frozenset({ONLINE}), Hub._search),

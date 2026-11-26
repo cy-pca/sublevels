@@ -64,6 +64,18 @@ class ConnLog:
             sa.Column("pinger", sa.Boolean),
             sa.Column("close_reason", sa.String(128)),
         )
+        self.actions = sa.Table(  # the operator log (P6 §7)
+            "operator_log", md,
+            sa.Column("id", sa.Integer, primary_key=True),
+            sa.Column("at", sa.Float, nullable=False, index=True),
+            sa.Column("hub", sa.String(64)),
+            sa.Column("action", sa.String(32), index=True),
+            sa.Column("actor", sa.String(128), index=True),
+            sa.Column("target", sa.String(256), index=True),
+            sa.Column("reason", sa.Text),
+            sa.Column("duration", sa.Float),
+            sa.Column("extra", sa.JSON),
+        )
         md.create_all(self.engine)
         self.q: queue.Queue = queue.Queue()
         self.written = 0
@@ -72,7 +84,13 @@ class ConnLog:
 
     def record(self, row: dict) -> None:
         """Queue one ended connection's row (from the hub's loop: never blocks)."""
-        self.q.put({c: row.get(c) for c in COLUMNS})
+        self.q.put((self.table, {c: row.get(c) for c in COLUMNS}))
+
+    def record_action(self, entry: dict) -> None:
+        """Queue one operator-log entry."""
+        self.q.put((self.actions, {k: entry.get(k) for k in ("at", "hub", "action", "actor",
+                                                             "target", "reason", "duration",
+                                                             "extra")}))
 
     def _writer(self) -> None:
         while True:
@@ -91,7 +109,8 @@ class ConnLog:
                 rows.append(r)
             try:
                 with self.engine.begin() as conn:
-                    conn.execute(self.table.insert(), rows)
+                    for table in {id(t): t for t, _ in rows}.values():
+                        conn.execute(table.insert(), [r for t, r in rows if t is table])
                 self.written += len(rows)
             except Exception:
                 log.exception("connection log: %d row(s) not written", len(rows))
@@ -103,6 +122,16 @@ class ConnLog:
         self.q.put(None)
         self.thread.join(timeout)
         self.engine.dispose()
+
+    def query_actions(self, *, actor: str = "", target: str = "", action: str = "",
+                      limit: int = 100) -> list[dict[str, Any]]:
+        sa, t = self.sa, self.actions
+        q = sa.select(t).order_by(t.c.at.desc(), t.c.id.desc()).limit(max(1, min(limit, 1000)))
+        for col, v in (("actor", actor), ("target", target), ("action", action)):
+            if v:
+                q = q.where(t.c[col] == v)
+        with self.engine.connect() as conn:
+            return [dict(r._mapping) for r in conn.execute(q)]
 
     def query(self, *, nick: str = "", address: str = "", client_id: str = "",
               country: str = "", limit: int = 100) -> list[dict[str, Any]]:

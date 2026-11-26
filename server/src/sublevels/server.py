@@ -80,7 +80,16 @@ def build(host: Any = None, config: HubConfig | None = None) -> Server:
 
         host = current_host() or Host()
     service = Service(host)
-    hub = Hub(config or HubConfig.from_env(), tree=host, call_later=host.loop.call_later)
+    cfg = config or HubConfig.from_env()
+    accounts = None
+    path = cfg.accounts_file or (os.path.join(cfg.data_dir, "accounts.json") if cfg.data_dir
+                                 else "")
+    if path and (cfg.accounts_file or os.path.exists(path)):
+        from .nmdc.accounts import FileAccounts
+
+        accounts = FileAccounts(path)
+        log.info("accounts: %s (%d)", path, len(accounts.accounts))
+    hub = Hub(cfg, tree=host, accounts=accounts, call_later=host.loop.call_later)
     service.hub = hub
     service.hublists = Publisher(hub)
     url = connlog_url(hub.config)

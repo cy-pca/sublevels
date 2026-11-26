@@ -15,6 +15,9 @@ from .service import Service
 log = logging.getLogger("sublevels.rpc")
 
 PING = "sublevels.ping"
+# Native operators' functions (P6 §6), each for callers with the admin role.
+OPERATOR = ("sublevels.kick", "sublevels.redirect", "sublevels.ban", "sublevels.unban",
+            "sublevels.bans", "sublevels.info")
 
 
 def available() -> bool:
@@ -39,4 +42,33 @@ def register(service: Service) -> list[str]:
     def ping(ctx):
         return service.ping(str(ctx.principal.get("id") or ""))
 
-    return [PING]
+    def op(name):
+        def wrap(fn):
+            return export(fn, name=name, clients=True, roles=["admin"], timeout=10)
+        return wrap
+
+    @op("sublevels.kick")
+    def kick(ctx, target, reason=""):
+        return service.operator_call(ctx.principal, "kick", target, reason)
+
+    @op("sublevels.redirect")
+    def redirect(ctx, target, address, reason=""):
+        return service.operator_call(ctx.principal, "redirect", target, address, reason)
+
+    @op("sublevels.ban")
+    def ban(ctx, target, duration, reason=""):
+        return service.operator_call(ctx.principal, "ban", target, duration, reason)
+
+    @op("sublevels.unban")
+    def unban(ctx, target):
+        return service.operator_call(ctx.principal, "unban", target)
+
+    @op("sublevels.bans")
+    def bans(ctx, text=""):
+        return service.operator_call(ctx.principal, "bans", text)
+
+    @op("sublevels.info")
+    def info(ctx, target):
+        return service.operator_call(ctx.principal, "info", target)
+
+    return [PING, *OPERATOR]

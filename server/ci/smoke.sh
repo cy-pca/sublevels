@@ -96,6 +96,12 @@ done
 grep -q '"stored":\[{' <<<"$conns" && grep -q '"nick":"smoke-plain"' <<<"$conns" \
   || fail "/admin/connections: the NMDC connection was not stored ($conns)"
 [[ -s "$work/data/connections.sqlite3" ]] || fail "no connection log in the data directory"
+# Bans and the operator log over the admin API (P6 §4, §7).
+curl -fsS --max-time 5 -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
+  -d '{"target":"ip:192.0.2.1","duration":"1h","reason":"smoke"}' "http://127.0.0.1:$http/admin/bans" \
+  | grep -q '"target":"ip:192.0.2.1"' || fail "POST /admin/bans failed"
+curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0.1:$http/admin/oplog" \
+  | grep -q '"action":"ban"' || fail "GET /admin/oplog does not show the ban"
 # The message of the day as an operator edits it (D9), then as anyone reads it.
 curl -fsS --max-time 5 -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
   -d '{"text":"smoke motd","by":"smoke"}' "http://127.0.0.1:$http/admin/documents/motd" >/dev/null \

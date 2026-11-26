@@ -8,6 +8,9 @@
   replaces one.
 - ``GET /admin/connections``: the connection log (D13), live and stored, filtered by ``nick``,
   ``address``, ``client_id`` or ``country``, newest first (``limit``, default 100).
+- ``GET /admin/bans``, ``POST /admin/bans`` (``{"target", "duration", "reason", "by"}``),
+  ``DELETE /admin/bans/<id>``; ``POST /admin/kick`` (``{"nick", "reason", "by"}``); and
+  ``GET /admin/oplog``, the operator log (P6 §4, §7). The admin API acts as an admin.
 - ``GET /admin/hublists``: the hub-list targets, each registration's result and the pingers'
   visits (P9, D15); ``POST /admin/hublists/register`` registers with every push target now.
 
@@ -73,6 +76,51 @@ def create_app(service: Service) -> FastAPI:
             raise HTTPException(404, "no hub")
         return service.hub.connections(nick=nick, address=address, client_id=client_id,
                                        country=country, limit=limit)
+
+    from .nmdc.operators import OpError
+
+    def _ops():
+        if service.hub is None:
+            raise HTTPException(404, "no hub")
+        return service.hub.ops
+
+    @app.get("/admin/bans", dependencies=[Depends(operator)])
+    def admin_bans(filter: str = "") -> dict:
+        return {"bans": _ops().bans(filter)}
+
+    @app.post("/admin/bans", dependencies=[Depends(operator)])
+    def admin_ban(target: str = Body(...), duration: str = Body(...), reason: str = Body(""),
+                  by: str = Body("admin API")) -> dict:
+        try:
+            return _ops().ban(by, "admin", target, duration, reason)
+        except OpError as e:
+            raise HTTPException(422, str(e))
+
+    @app.delete("/admin/bans/{ban_id}", dependencies=[Depends(operator)])
+    def admin_unban(ban_id: int, by: str = "admin API") -> dict:
+        try:
+            return _ops().unban(by, "admin", f"#{ban_id}")
+        except OpError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/admin/kick", dependencies=[Depends(operator)])
+    def admin_kick(nick: str = Body(...), reason: str = Body(""),
+                   by: str = Body("admin API")) -> dict:
+        try:
+            return _ops().kick(by, "admin", nick, reason)
+        except OpError as e:
+            raise HTTPException(422, str(e))
+
+    @app.get("/admin/oplog", dependencies=[Depends(operator)])
+    def admin_oplog(actor: str = "", target: str = "", action: str = "",
+                    limit: int = 100) -> dict:
+        hub = _ops().hub
+        live = [a for a in hub.actions if (not actor or a["actor"] == actor)
+                and (not target or a["target"] == target)
+                and (not action or a["action"] == action)][-limit:][::-1]
+        stored = hub.connlog.query_actions(actor=actor, target=target, action=action,
+                                           limit=limit) if hub.connlog is not None else []
+        return {"recent": live, "stored": stored}
 
     @app.get("/admin/hublists", dependencies=[Depends(operator)])
     def admin_hublists() -> dict:
