@@ -86,6 +86,12 @@ stats=$(curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0
   || fail "GET /admin/stats failed"
 echo "smoke: GET /admin/stats -> $stats"
 grep -q "\"logins\":$logins" <<<"$stats" || fail "/admin/stats did not count $logins login(s)"
+# The message of the day as an operator edits it (D9), then as anyone reads it.
+curl -fsS --max-time 5 -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
+  -d '{"text":"smoke motd","by":"smoke"}' "http://127.0.0.1:$http/admin/documents/motd" >/dev/null \
+  || fail "PUT /admin/documents/motd failed"
+curl -fsS --max-time 5 "http://127.0.0.1:$http/documents/motd" | grep -q '"text":"smoke motd"' \
+  || fail "GET /documents/motd did not return the edit"
 
 kill -TERM "$pid"
 rc=
