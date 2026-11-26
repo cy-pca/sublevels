@@ -23,8 +23,8 @@ name: ci
 #           NMDC client meet in the conference room and chat both ways.
 #
 # The interop, transfers, soak and bridge-e2e jobs run on both of the hub's plain-NMDC transports
-# (SUBLEVELS_NMDC_TRANSPORT): asyncio, and libcvc's native connection engine (pycvc 4.0.9 from
-# cvcpkg). NMDCS stays on asyncio either way until the engine has TLS (libcvc N3), so a leg's
+# (SUBLEVELS_NMDC_TRANSPORT, set on every leg): asyncio, and libcvc's native connection engine
+# (pycvc 4.0.9 from cvcpkg). The default, auto, is the engine where pycvc has it. NMDCS stays on asyncio either way until the engine has TLS (libcvc N3), so a leg's
 # engine coverage is its plain-NMDC connections: interop-ncdc's ncdcA and ncdcC (ncdcB is NMDCS),
 # interop-airdcpp and transfers (nmdc) in full, and in transfers (nmdcs) only the plain session the
 # TLS-only hub turns away. The arisrvx job runs the socket tests on both and smokes the engine as
@@ -83,10 +83,10 @@ jobs:
       - name: pytest (cvcpkg's python3.12, pycvc beside it)
         working-directory: server
         run: ~/sublevels-ci/deps/bin/python3.12 -m pytest -rs -p no:cacheprovider
-      - name: arisrvx smoke run
+      - name: arisrvx smoke run, the default transport (auto picks arisrvx's own engine, host.net)
         run: bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
-      - name: arisrvx smoke run, plain NMDC on arisrvx's own engine (host.net)
-        run: SUBLEVELS_NMDC_TRANSPORT=engine bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
+      - name: arisrvx smoke run, plain NMDC on asyncio (the fallback setting)
+        run: SUBLEVELS_NMDC_TRANSPORT=asyncio bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
 
   package:
     # The cvcpkg recipe (recipes/sublevels) built into a prefix beside arisrvx and pycvc from
