@@ -163,7 +163,7 @@ runners only.
     because NMDC is raw TCP and the web reverse proxy does not carry it.
 - **M2b, a hublist** (D16, P10): registrations on 2501, the pinger, `hublist.xml.bz2` over HTTP, operator moderation, the cluster's hubs, and the `+hublist` view. It is
   tested with DC++, AirDC++ and ncdc loading the list as black boxes.
-- **M3, nicotina native.** Components in `client/` for the hub list, user list, main chat,
+- **M3, nicotina native.** The client UI plan is [CLIENT_UI.md](CLIENT_UI.md): views, the state model, libcvc widgets U1-U7, and order C0-C5. Components in `client/` for the hub list, user list, main chat,
   private messages, search, the message of the day and rules, and relay-mode transfers (X8, X9)
   between native clients. nicotina imports them and connects to a sublevels hub in `arigl`,
   `ari` (FTXUI, tvision) and the browser, with `ari snapshot` tests of each view. Vanilla and
