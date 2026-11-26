@@ -12,7 +12,7 @@ license = { text = "MIT" }
 requires-python = ">=3.12,<3.13"
 # pycvc (pycvc.ariadne: Host, serve_asgi, export) is not on PyPI. arisrvx carries pycvc.ariadne
 # built in; under plain python it comes from cvcpkg's pycvc-cp312.
-dependencies = ["fastapi", "uvicorn"]
+dependencies = ["fastapi", "uvicorn", "sqlalchemy", "maxminddb"]
 
 [project.optional-dependencies]
 test = ["pytest", "httpx"]

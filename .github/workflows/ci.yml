@@ -58,8 +58,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install fastapi, uvicorn, httpx and pytest (PyPI)
-        run: python -m pip install --quiet fastapi uvicorn httpx pytest
+      - name: Install fastapi, uvicorn, sqlalchemy, maxminddb, httpx and pytest (PyPI)
+        run: python -m pip install --quiet fastapi uvicorn sqlalchemy maxminddb httpx pytest
       - name: pytest
         run: python -m pytest -rs
 

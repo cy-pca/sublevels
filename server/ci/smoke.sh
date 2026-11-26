@@ -54,7 +54,7 @@ fi
 token=smoke-admin-token-$RANDOM$RANDOM  # a test value for this run only
 
 env SUBLEVELS_HTTP_LISTEN=127.0.0.1:$http SUBLEVELS_NMDC_LISTEN=127.0.0.1:$nmdc "${tls_env[@]}" \
-  SUBLEVELS_ADMIN_TOKEN="$token" "$arisrvx" \
+  SUBLEVELS_ADMIN_TOKEN="$token" SUBLEVELS_DATA_DIR="$work/data" "$arisrvx" \
   --python "$here/main.py" --doc "$here/share/sublevels/server.ari" \
   --state-listen "127.0.0.1:$state" --media-listen "127.0.0.1:$media" --ws-listen "127.0.0.1:$ws" \
   --shutdown-timeout 5 >"$log" 2>&1 &
@@ -86,6 +86,16 @@ stats=$(curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0
   || fail "GET /admin/stats failed"
 echo "smoke: GET /admin/stats -> $stats"
 grep -q "\"logins\":$logins" <<<"$stats" || fail "/admin/stats did not count $logins login(s)"
+# The connection log (D13): the clients' connections, stored once they closed.
+for _ in $(seq 50); do
+  conns=$(curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0.1:$http/admin/connections") \
+    || fail "GET /admin/connections failed"
+  grep -q '"nick":"smoke-plain"' <<<"$conns" && break
+  sleep 0.1
+done
+grep -q '"stored":\[{' <<<"$conns" && grep -q '"nick":"smoke-plain"' <<<"$conns" \
+  || fail "/admin/connections: the NMDC connection was not stored ($conns)"
+[[ -s "$work/data/connections.sqlite3" ]] || fail "no connection log in the data directory"
 # The message of the day as an operator edits it (D9), then as anyone reads it.
 curl -fsS --max-time 5 -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
   -d '{"text":"smoke motd","by":"smoke"}' "http://127.0.0.1:$http/admin/documents/motd" >/dev/null \

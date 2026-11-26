@@ -1,0 +1,123 @@
+"""The connection log (roadmap D13): one row per connection, kept across restarts.
+
+Each row has the times in and out, nick, account, client id, address and port, country, region
+and city, client and version, protocol and TLS, bytes each way, whether it was a hub-list pinger,
+and why it closed. Rows are written when a connection ends; live connections are the hub's own
+(``Hub.sessions``), and the admin API shows both.
+
+Rows go to SQLite through SQLAlchemy (``sqlalchemy-cp312`` on cvcpkg), by default
+``<data_dir>/connections.sqlite3``. The hub's loop never waits on the disk: rows are queued, and
+a writer thread stores them in batches. Once the registry's record (ARISRV_IDENTITY §2.2) is
+available, this log stays: the registry keeps records for one run only.
+"""
+
+from __future__ import annotations
+
+import logging
+import queue
+import threading
+from typing import Any
+
+log = logging.getLogger("sublevels.connlog")
+
+COLUMNS = ("hub", "opened_at", "closed_at", "nick", "account", "client_id", "address", "port",
+           "country", "region", "city", "client", "version", "protocol", "tls", "bytes_in",
+           "bytes_out", "pinger", "close_reason")
+BATCH = 500
+
+
+class ConnLog:
+    def __init__(self, url: str):
+        import sqlalchemy as sa
+
+        self.sa = sa
+        self.url = url
+        self.engine = sa.create_engine(url)
+        if url.startswith("sqlite"):
+            @sa.event.listens_for(self.engine, "connect")
+            def _pragmas(conn, _record):  # readers while the writer writes
+                cur = conn.cursor()
+                cur.execute("PRAGMA journal_mode=WAL")
+                cur.execute("PRAGMA synchronous=NORMAL")
+                cur.close()
+        md = sa.MetaData()
+        self.table = sa.Table(
+            "connections", md,
+            sa.Column("id", sa.Integer, primary_key=True),
+            sa.Column("hub", sa.String(64), nullable=False),
+            sa.Column("opened_at", sa.Float, nullable=False, index=True),
+            sa.Column("closed_at", sa.Float),
+            sa.Column("nick", sa.String(64), index=True),
+            sa.Column("account", sa.String(64)),
+            sa.Column("client_id", sa.String(64), index=True),
+            sa.Column("address", sa.String(64), index=True),
+            sa.Column("port", sa.Integer),
+            sa.Column("country", sa.String(2)),
+            sa.Column("region", sa.String(128)),
+            sa.Column("city", sa.String(128)),
+            sa.Column("client", sa.String(64)),
+            sa.Column("version", sa.String(32)),
+            sa.Column("protocol", sa.String(16)),
+            sa.Column("tls", sa.Boolean),
+            sa.Column("bytes_in", sa.Integer),
+            sa.Column("bytes_out", sa.Integer),
+            sa.Column("pinger", sa.Boolean),
+            sa.Column("close_reason", sa.String(128)),
+        )
+        md.create_all(self.engine)
+        self.q: queue.Queue = queue.Queue()
+        self.written = 0
+        self.thread = threading.Thread(target=self._writer, name="sublevels-connlog", daemon=True)
+        self.thread.start()
+
+    def record(self, row: dict) -> None:
+        """Queue one ended connection's row (from the hub's loop: never blocks)."""
+        self.q.put({c: row.get(c) for c in COLUMNS})
+
+    def _writer(self) -> None:
+        while True:
+            first = self.q.get()
+            if first is None:
+                return
+            rows, stop = [first], False
+            while len(rows) < BATCH:
+                try:
+                    r = self.q.get_nowait()
+                except queue.Empty:
+                    break
+                if r is None:
+                    stop = True
+                    break
+                rows.append(r)
+            try:
+                with self.engine.begin() as conn:
+                    conn.execute(self.table.insert(), rows)
+                self.written += len(rows)
+            except Exception:
+                log.exception("connection log: %d row(s) not written", len(rows))
+            if stop:
+                return
+
+    def flush(self, timeout: float = 10.0) -> None:
+        """Write what is queued and stop the writer (at shutdown)."""
+        self.q.put(None)
+        self.thread.join(timeout)
+        self.engine.dispose()
+
+    def query(self, *, nick: str = "", address: str = "", client_id: str = "",
+              country: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        """The newest rows first, filtered by any of nick (ignoring case), address, client id and
+        country."""
+        sa, t = self.sa, self.table
+        q = sa.select(t).order_by(t.c.opened_at.desc(), t.c.id.desc()).limit(max(1, min(limit,
+                                                                                         1000)))
+        if nick:
+            q = q.where(sa.func.lower(t.c.nick) == nick.lower())
+        if address:
+            q = q.where(t.c.address == address)
+        if client_id:
+            q = q.where(t.c.client_id == client_id)
+        if country:
+            q = q.where(t.c.country == country.upper())
+        with self.engine.connect() as conn:
+            return [dict(r._mapping) for r in conn.execute(q)]

@@ -73,6 +73,18 @@ class HubConfig:
     hublist_interval: float = 900.0  # seconds between pushes to each target
     hublist_jitter: float = 120.0  # up to this much random delay on each
     pinger_time: float = 60.0  # a pinger is closed this long after it logs in (P9 §2)
+    # Geolocation (D11): a GeoLite2 City database the operator downloaded ("" for none).
+    geoip_db: str = ""
+    # Location policy (D12), applied before $Lock: "off", "deny" (the countries) or "allow"
+    # (only the countries); exempt networks bypass it; unplaceable addresses "admit" or "refuse".
+    location_policy: str = "off"
+    location_countries: tuple[str, ...] = ()
+    location_exempt: tuple[str, ...] = ()
+    location_unknown: str = "admit"
+    country_prefix: bool = False  # "[CC] " before descriptions in $MyINFO (D13, P2 §5)
+    # The connection log (D13): a SQLAlchemy URL; "" is <data_dir>/connections.sqlite3 when there
+    # is a data directory, and "off" keeps none.
+    connlog: str = ""
     limits: Limits = field(default_factory=Limits)
 
     def with_(self, **kw) -> "HubConfig":
@@ -93,7 +105,9 @@ class HubConfig:
                 "SUBLEVELS_NMDC_TRANSPORT": "transport",
                 "SUBLEVELS_PUBLIC_ADDRESS": "public_address",
                 "SUBLEVELS_HUB_DESCRIPTION": "description", "SUBLEVELS_HUB_OWNER": "owner",
-                "SUBLEVELS_DATA_DIR": "data_dir"}
+                "SUBLEVELS_DATA_DIR": "data_dir", "SUBLEVELS_GEOIP_DB": "geoip_db",
+                "SUBLEVELS_LOCATION_POLICY": "location_policy",
+                "SUBLEVELS_LOCATION_UNKNOWN": "location_unknown", "SUBLEVELS_CONNLOG": "connlog"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
@@ -115,6 +129,10 @@ class HubConfig:
             if env.get(var):  # the text until an operator edits it
                 with open(env[var], encoding="utf-8") as f:
                     kw[name] = tuple(f.read().rstrip("\n").split("\n"))
+        for var, name in {"SUBLEVELS_LOCATION_COUNTRIES": "location_countries",
+                          "SUBLEVELS_LOCATION_EXEMPT": "location_exempt"}.items():
+            if env.get(var):
+                kw[name] = tuple(v.strip() for v in env[var].split(",") if v.strip())
         if env.get("SUBLEVELS_HUBLISTS"):
             v = env["SUBLEVELS_HUBLISTS"].strip()
             kw["hublists"] = () if v == "off" else tuple(t.strip() for t in v.split(",")
@@ -128,7 +146,8 @@ class HubConfig:
         if env.get("SUBLEVELS_MAX_USERS"):
             kw["max_users"] = int(env["SUBLEVELS_MAX_USERS"])
         for var, name in {"SUBLEVELS_STRICT_KEY": "strict_key",
-                          "SUBLEVELS_TLS_REQUIRED": "tls_required"}.items():
+                          "SUBLEVELS_TLS_REQUIRED": "tls_required",
+                          "SUBLEVELS_COUNTRY_PREFIX": "country_prefix"}.items():
             if env.get(var):
                 kw[name] = env[var].strip().lower() in ("1", "true", "yes", "on")
         if env.get("SUBLEVELS_RESERVED_NICKS"):

@@ -6,6 +6,8 @@
 - ``GET /documents/motd`` and ``GET /documents/rules``: the hub's message of the day and rules
   (D9), which anyone may read; ``PUT /admin/documents/<name>`` with ``{"text": ..., "by": ...}``
   replaces one.
+- ``GET /admin/connections``: the connection log (D13), live and stored, filtered by ``nick``,
+  ``address``, ``client_id`` or ``country``, newest first (``limit``, default 100).
 - ``GET /admin/hublists``: the hub-list targets, each registration's result and the pingers'
   visits (P9, D15); ``POST /admin/hublists/register`` registers with every push target now.
 
@@ -63,6 +65,14 @@ def create_app(service: Service) -> FastAPI:
             return service.hub.set_document(_name(name), text, by)
         except DocumentError as e:
             raise HTTPException(422, f"{name}: {e}")
+
+    @app.get("/admin/connections", dependencies=[Depends(operator)])
+    def admin_connections(nick: str = "", address: str = "", client_id: str = "",
+                          country: str = "", limit: int = 100) -> dict:
+        if service.hub is None:
+            raise HTTPException(404, "no hub")
+        return service.hub.connections(nick=nick, address=address, client_id=client_id,
+                                       country=country, limit=limit)
 
     @app.get("/admin/hublists", dependencies=[Depends(operator)])
     def admin_hublists() -> dict:

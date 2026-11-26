@@ -59,6 +59,19 @@ def admin_token(env=None) -> str:
     return env.get("SUBLEVELS_ADMIN_TOKEN", "").strip()
 
 
+def connlog_url(cfg: HubConfig) -> str:
+    """The connection log's database (D13): ``SUBLEVELS_CONNLOG``, else SQLite in the data
+    directory; "" for none."""
+    if cfg.connlog == "off":
+        return ""
+    if cfg.connlog:
+        return cfg.connlog
+    if cfg.data_dir:
+        os.makedirs(cfg.data_dir, exist_ok=True)
+        return "sqlite:///" + os.path.join(os.path.abspath(cfg.data_dir), "connections.sqlite3")
+    return ""
+
+
 def build(host: Any = None, config: HubConfig | None = None) -> Server:
     """Make (or adopt) the program's Host and put the service on it: the hub made, the exports
     registered, the HTTP app made. Nothing is served or published until :func:`serve`."""
@@ -70,6 +83,14 @@ def build(host: Any = None, config: HubConfig | None = None) -> Server:
     hub = Hub(config or HubConfig.from_env(), tree=host, call_later=host.loop.call_later)
     service.hub = hub
     service.hublists = Publisher(hub)
+    url = connlog_url(hub.config)
+    if url:
+        from .nmdc.connlog import ConnLog
+
+        hub.connlog = ConnLog(url)
+        log.info("connection log: %s", url.split("://", 1)[0] + "://…" if "@" in url else url)
+    else:
+        log.info("connection log: off (no data directory)")
     if bridge.available(host):
         # The relay's room in arisrvx; under plain python, the hub's (SUBLEVELS_ROOM).
         bridge.RoomBridge(hub, host, getattr(host, "room", None) or hub.config.room)
@@ -164,6 +185,8 @@ def serve(server: Server, http_listen: str = DEFAULT_HTTP, txwtf_mode: str | Non
         if listeners is not None and not host.loop.is_closed():
             host.loop.run_until_complete(server.service.hublists.close())
             host.loop.run_until_complete(listeners.close(server.hub))
+        if server.hub.connlog is not None:
+            server.hub.connlog.flush()
         server.service.stop()
 
 

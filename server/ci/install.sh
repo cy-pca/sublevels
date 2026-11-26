@@ -29,7 +29,8 @@ cvcpkg install \
   "libcvc==$LIBCVC+$LIBCVC_BUILD" \
   "arisrvx==$LIBCVC+$ARISRVX_BUILD" \
   "pycvc-cp312==$LIBCVC+$ARISRVX_BUILD" \
-  fastapi-cp312 uvicorn-cp312 httpx-cp312 pytest-cp312 "${extra[@]}" \
+  fastapi-cp312 uvicorn-cp312 sqlalchemy-cp312 maxminddb-cp312 httpx-cp312 pytest-cp312 \
+  "${extra[@]}" \
   --prefix "$deps" --config release --link shared --no-fallback-to-source
 sed -n '/^- name: \(arisrvx\|pycvc-cp312\|libcvc\|libcvc-cuda\|python312\|fastapi-cp312\|uvicorn-cp312\)$/{p;n;p;}' \
   "$deps/share/libcvc-deps/lockfile.yaml"
@@ -40,7 +41,7 @@ if ldd "$deps/bin/arisrvx" "$deps/lib/python3.12/site-packages/_pycvc.so" | grep
   echo "::error::arisrvx or pycvc cannot find a shared library" >&2
   exit 1
 fi
-"$deps/bin/python3.12" -c 'import pycvc, pycvc.ariadne, fastapi, uvicorn, httpx, pytest' || {
+"$deps/bin/python3.12" -c 'import pycvc, pycvc.ariadne, fastapi, uvicorn, sqlalchemy, maxminddb, httpx, pytest' || {
   echo "::error::cvcpkg's python3.12 cannot import pycvc or the ASGI stack" >&2
   exit 1
 }
