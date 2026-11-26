@@ -101,6 +101,8 @@ pid=
 [[ "$rc" -eq 0 ]] || fail "arisrvx exited $rc after SIGTERM"
 if grep -q "Traceback" "$log"; then fail "a traceback in arisrvx's log"; fi
 grep -q "publishing sublevels.server" "$log" || fail "the service did not report publishing"
+# Without a public address nothing is pushed to the hub lists: CI never registers with a real one.
+grep -q "hub lists: not registering: no public address" "$log" || fail "the hub did not say it is not registering with hub lists"
 # Plain NMDC's transport: on the native engine when asked for (engine), and by default (auto) on a
 # host that has it (SUBLEVELS_REQUIRE_ENGINE=1 says this one must); on asyncio when asked for.
 # On the engine it must be arisrvx's own (host.net), not a second one the hub made.

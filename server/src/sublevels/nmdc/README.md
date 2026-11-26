@@ -10,9 +10,10 @@ Connect implementation, and a change here names the spec sections it implements.
 | `codec.py` | P1 §2-§5 | The code page edge (Windows-1252 by default, D8), escaping, `$Lock`, `$Key` |
 | `limits.py` | P1 §6, P2-P5 limits | Every limit as a setting, and the rate limiters |
 | `myinfo.py` | P2 §5 | Reading `$MyINFO`'s fields; the bytes are kept verbatim |
-| `hub.py` | P2, P3, P4, P5 | The login state machine, the user list, chat, private messages, the bot and its `+help`/`+motd`/`+rules`, search and `$SR` routing, `$ConnectToMe`/`$RevConnectToMe` |
+| `hub.py` | P2, P3, P4, P5, P9 §2 | The login state machine, the user list, chat, private messages, the bot and its `+help`/`+motd`/`+rules`, search and `$SR` routing, `$ConnectToMe`/`$RevConnectToMe`, hub-list pingers and `$HubINFO` |
 | `listener.py` | P1 §1, P7 §1 | The asyncio listeners: NMDC (411) and NMDCS (4111, TLS 1.2+, certificate reloaded on change) |
 | `engine.py` | P1 §1 | Plain NMDC on libcvc's native connection engine (ARIADNE_NET_ENGINE N2), the default where pycvc has it |
+| `hublists.py` | P9 §1, D15 | Registration with hub lists: push targets on a timer, with jitter, back-off and every result kept for `/admin/hublists` |
 | `counters.py` | D14 | The counters, in memory; `Hub.stats()` adds the live values |
 | `config.py` | | `HubConfig`, from `SUBLEVELS_*` variables |
 

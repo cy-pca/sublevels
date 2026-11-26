@@ -50,9 +50,15 @@ The NMDC hub:
   --hub-name NAME          the hub's name (default sublevels)
   --topic TEXT             the hub's topic
 
+Hub lists (P9):
+  --public-address HOST[:PORT]  where users reach the hub's plain NMDC; until it is set, the hub
+                           registers with no hub list, and its $HubINFO gives no address
+  --hublists LIST|off      the targets, comma-separated: host[:port][;key=standard|legacy]
+                           [;method=push|pinger] (default hublist.te-home.net,hublist.pwiam.com)
+
 The HTTP API and TX.WTF:
   --http ADDR:PORT|off     the hub's HTTP API (default 127.0.0.1:8411)
-  --admin-token-file FILE  bearer token for GET /admin/stats (default: the admin API is off)
+  --admin-token-file FILE  bearer token for the /admin routes (default: the admin API is off)
   --txwtf embedded|URL|off TX.WTF in this process (default: embedded when txwtf is installed),
                            a separate instance's URL, or off
   --txwtf-listen ADDR:PORT where an embedded TX.WTF listens (default 127.0.0.1:8086)
@@ -95,6 +101,8 @@ while [[ $# -gt 0 ]]; do
     --tls-required) envs+=("SUBLEVELS_TLS_REQUIRED=1"); shift ;;
     --hub-name) need "$@"; envs+=("SUBLEVELS_HUB_NAME=$2"); shift 2 ;;
     --topic) need "$@"; envs+=("SUBLEVELS_HUB_TOPIC=$2"); shift 2 ;;
+    --public-address) need "$@"; envs+=("SUBLEVELS_PUBLIC_ADDRESS=$2"); shift 2 ;;
+    --hublists) need "$@"; envs+=("SUBLEVELS_HUBLISTS=$2"); shift 2 ;;
     --http) need "$@"; envs+=("SUBLEVELS_HTTP_LISTEN=$2"); shift 2 ;;
     --admin-token-file) need "$@"; envs+=("SUBLEVELS_ADMIN_TOKEN_FILE=$2"); shift 2 ;;
     --txwtf) need "$@"; envs+=("SUBLEVELS_TXWTF=$2"); shift 2 ;;
