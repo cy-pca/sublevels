@@ -72,9 +72,10 @@ class Client:
         for m in messages:
             self.writer.write(m if isinstance(m, bytes) else m.encode(self.encoding))
 
-    async def login(self, timeout: float = 10.0) -> None:
-        """$Lock → $Supports, $Key, $ValidateNick → $Hello → $Version, $GetNickList, $MyINFO, then
-        wait for our own $MyINFO back (the hub lists it to NoHello clients)."""
+    async def login(self, timeout: float = 10.0, password: str | None = None) -> None:
+        """$Lock → $Supports, $Key, $ValidateNick → ($GetPass → $MyPass, with ``password``) →
+        $Hello → $Version, $GetNickList, $MyINFO, then wait for our own $MyINFO back (the hub
+        lists it to NoHello clients)."""
         lock_msg = await self.read(timeout)
         if not lock_msg.startswith("$Lock "):
             raise RuntimeError(f"expected $Lock, got {lock_msg!r}")
@@ -83,6 +84,9 @@ class Client:
                   f"$ValidateNick {self.nick}|".encode(self.encoding))
         m = await self.read_until(lambda m: m.startswith(("$Hello ", "$ValidateDenide",
                                                           "$GetPass", "$HubIsFull")), timeout)
+        if m == "$GetPass|" and password is not None:
+            self.send(f"$MyPass {password}|".encode(self.encoding))
+            m = await self.read_until(lambda m: m.startswith(("$Hello ", "$BadPass")), timeout)
         if not m.startswith("$Hello "):
             raise RuntimeError(f"login refused: {m!r}")
         self.send("$Version 1,0091|", "$GetNickList|", self.myinfo())

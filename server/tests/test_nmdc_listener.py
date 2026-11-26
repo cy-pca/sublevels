@@ -280,3 +280,46 @@ def test_transport_auto_picks_the_engine_where_pycvc_has_it(monkeypatch):
     assert pick_transport(HubConfig(transport="engine")) == "engine"  # start_listeners refuses it
     with pytest.raises(ValueError):
         pick_transport(HubConfig(transport="uvloop"))
+
+
+def test_location_policy_lets_operators_in_with_their_password(transport):
+    """D12 on real sockets: 127.0.0.1 cannot be placed, and this hub refuses what it cannot
+    place, so only the exempt operator, with its password, gets in."""
+
+    class Accounts:
+        def is_registered(self, nick):
+            return nick == "op"
+
+        def check(self, nick, password):
+            return nick == "op" and password == "pw"
+
+        def is_operator(self, nick):
+            return nick == "op"
+
+    async def go():
+        cfg = plain(transport, location_policy="allow", location_countries=("DE",),
+                    location_unknown="refuse", geoip_db="/nonexistent.mmdb",
+                    password_requires_tls=False)
+        hub = Hub(cfg, accounts=Accounts())
+        listeners = await start_listeners(hub)
+        port = {p: n for p, _, n in listeners.addresses()}["nmdc"]
+        try:
+            op = Client("op")
+            await op.connect("127.0.0.1", port)
+            await op.login(password="pw")
+            alice = Client("alice")
+            await alice.connect("127.0.0.1", port)
+            with pytest.raises((RuntimeError, ConnectionError, asyncio.IncompleteReadError)):
+                await alice.login(timeout=3)
+            wrong = Client("op")
+            await wrong.connect("127.0.0.1", port)
+            with pytest.raises((RuntimeError, ConnectionError, asyncio.IncompleteReadError)):
+                await wrong.login(timeout=3, password="nope")
+            await asyncio.sleep(0.2)
+            return set(hub.users), [a["action"] for a in hub.actions]
+        finally:
+            await listeners.close(hub)
+
+    users, actions = run(go())
+    assert users == {"op"}
+    assert "location_exempt" in actions and "refused_location" in actions

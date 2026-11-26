@@ -59,7 +59,10 @@ The NMDC hub:
                            python -m sublevels.nmdc.accounts FILE add NICK --role op
   --geoip-db FILE          a GeoLite2 City database you downloaded from MaxMind (D11): countries
                            in the connection log and the admin API, and for SUBLEVELS_LOCATION_*
-                           and SUBLEVELS_COUNTRY_PREFIX=1; reloaded when the file changes
+                           and SUBLEVELS_COUNTRY_PREFIX=1; reloaded when the file changes.
+                           A location policy lets ops and admins in with their password, and
+                           accounts in SUBLEVELS_LOCATION_EXEMPT_ACCOUNTS or flagged with
+                           python -m sublevels.nmdc.accounts FILE exempt NICK on
 
 Hub lists (P9):
   --public-address HOST[:PORT]  where users reach the hub's plain NMDC; until it is set, the hub

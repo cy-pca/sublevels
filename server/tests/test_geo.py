@@ -37,6 +37,8 @@ class FakeGeo:
 
 
 def geo_world(table=None, **kw):
+    if kw.get("location_policy", "off") != "off":
+        kw.setdefault("geoip_db", "/nonexistent/GeoLite2-City.mmdb")  # FakeGeo stands in
     w = World(HubConfig(**kw))
     w.hub.geo = FakeGeo(table or {"81.2.69.1": Location("GB", "England", "London"),
                                   "2.16.0.1": Location("DE", "", "Berlin")})
@@ -146,7 +148,8 @@ def test_connection_log(tmp_path):
             return nick == "op"
 
     log = ConnLog(f"sqlite:///{tmp_path / 'c.sqlite3'}")
-    w = World(HubConfig(location_policy="deny", location_countries=("DE",)), accounts=Accounts())
+    w = World(HubConfig(location_policy="deny", location_countries=("DE",), geoip_db="/x.mmdb",
+                        password_requires_tls=False), accounts=Accounts())
     w.hub.geo = FakeGeo({"81.2.69.1": Location("GB", "England", "London"),
                          "2.16.0.1": Location("DE")})
     w.hub.connlog = log
@@ -155,7 +158,9 @@ def test_connection_log(tmp_path):
     w.send(o, "$Supports NoHello|", f"$Key {w.key_for(co)}|", "$ValidateNick op|",
            "$MyPass pw|", myinfo("op"))
     p, cp = w.login("pinger", supports="NoHello BotINFO", share=0)
-    d, cd = w.connect("2.16.0.1")
+    d, cd = w.connect("2.16.0.1")  # held: the hub has accounts, so it might be exempt
+    w.send(d, "$Supports NoHello|", f"$Key {w.key_for(cd)}|", "$ValidateNick dieter|")
+    assert cd.closed  # dieter is not
     live = w.hub.connections()["live"]
     assert {r["nick"] for r in live} == {"alice", "op", "pinger"}
     for s, why in ((a, "closed by the client"), (o, "closed by the client"),
@@ -171,7 +176,8 @@ def test_connection_log(tmp_path):
     assert by["alice"]["bytes_out"] > 0
     assert by["op"]["account"] == "op" and by["op"]["tls"] and by["op"]["protocol"] == "nmdcs"
     assert by["pinger"]["pinger"] and by["pinger"]["close_reason"] == "pinger time limit"
-    assert by[""]["close_reason"] == "location policy (DE)" and by[""]["address"] == "2.16.0.1"
+    assert by["dieter"]["close_reason"] == "location policy (DE)"
+    assert by["dieter"]["address"] == "2.16.0.1"
     assert [r["nick"] for r in log2.query(country="gb")] == ["alice"]
     assert [r["nick"] for r in log2.query(nick="ALICE")] == ["alice"]
     assert all(r["closed_at"] >= r["opened_at"] for r in rows)
