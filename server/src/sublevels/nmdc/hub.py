@@ -28,6 +28,7 @@ from . import myinfo as mi
 from .codec import CodePage, escape, key_matches, make_lock
 from .config import HubConfig
 from .counters import Counters
+from .analytics import Analytics
 from .bans import Bans, until_text
 from .documents import Documents
 from .geo import UNKNOWN, GeoDB, LocationPolicy
@@ -223,6 +224,7 @@ class Hub:
         self.topic = self.documents.topic(self.config.topic)  # an admin's !topic outlives a restart
         self.bans = Bans(self.config.data_dir)
         self.ops = Operators(self)
+        self.analytics = Analytics(self)  # D14; sampling starts with Analytics.start()
         self.actions: deque[dict] = deque(maxlen=1000)  # the operator log, newest last (P6 §7)
         self._ban_hits: dict[str, Window] = {}  # address -> refused-by-ban attempts
         if hasattr(self.accounts, "on_change"):

@@ -11,6 +11,8 @@
 - ``GET /admin/bans``, ``POST /admin/bans`` (``{"target", "duration", "reason", "by"}``),
   ``DELETE /admin/bans/<id>``; ``POST /admin/kick`` (``{"nick", "reason", "by"}``); and
   ``GET /admin/oplog``, the operator log (P6 §4, §7). The admin API acts as an admin.
+- ``GET /admin/analytics``: the metrics there are; with ``metric`` (and ``resolution`` 10s, 1m
+  or 1h, ``since``, ``until``, Unix seconds; the last hour by default), its points (D14).
 - ``GET /admin/hublists``: the hub-list targets, each registration's result and the pingers'
   visits (P9, D15); ``POST /admin/hublists/register`` registers with every push target now.
 
@@ -121,6 +123,14 @@ def create_app(service: Service) -> FastAPI:
         stored = hub.connlog.query_actions(actor=actor, target=target, action=action,
                                            limit=limit) if hub.connlog is not None else []
         return {"recent": live, "stored": stored}
+
+    @app.get("/admin/analytics", dependencies=[Depends(operator)])
+    def admin_analytics(metric: str = "", resolution: str = "10s", since: float | None = None,
+                        until: float | None = None) -> dict:
+        try:
+            return service.analytics(metric, resolution, since, until)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
 
     @app.get("/admin/hublists", dependencies=[Depends(operator)])
     def admin_hublists() -> dict:

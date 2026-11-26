@@ -23,7 +23,7 @@ log = logging.getLogger("sublevels.connlog")
 COLUMNS = ("hub", "opened_at", "closed_at", "nick", "account", "client_id", "address", "port",
            "country", "region", "city", "client", "version", "protocol", "tls", "bytes_in",
            "bytes_out", "pinger", "close_reason")
-BATCH = 500
+BATCH = 5000  # rows a transaction takes: connections, operator-log entries, analytics values
 
 
 class ConnLog:
@@ -76,6 +76,15 @@ class ConnLog:
             sa.Column("duration", sa.Float),
             sa.Column("extra", sa.JSON),
         )
+        self.samples = sa.Table(  # analytics (D14): one value per metric per sample
+            "analytics", md,
+            sa.Column("hub", sa.String(64), nullable=False),
+            sa.Column("res", sa.String(4), nullable=False),
+            sa.Column("t", sa.Float, nullable=False),
+            sa.Column("metric", sa.String(128), nullable=False),
+            sa.Column("value", sa.Float, nullable=False),
+            sa.Index("analytics_by_metric", "hub", "res", "metric", "t"),
+        )
         md.create_all(self.engine)
         self.q: queue.Queue = queue.Queue()
         self.written = 0
@@ -85,6 +94,33 @@ class ConnLog:
     def record(self, row: dict) -> None:
         """Queue one ended connection's row (from the hub's loop: never blocks)."""
         self.q.put((self.table, {c: row.get(c) for c in COLUMNS}))
+
+    def record_samples(self, hub: str, res: str, t: float, values: dict) -> None:
+        """Queue one analytics sample (D14)."""
+        for m, v in values.items():
+            self.q.put((self.samples, {"hub": hub, "res": res, "t": t, "metric": m,
+                                       "value": float(v)}))
+
+    def prune_samples(self, now: float) -> None:
+        """Queue the removal of samples older than their resolution keeps (analytics.RETENTION)."""
+        self.q.put(("prune", now))
+
+    def query_samples(self, hub: str, res: str, metric: str, since: float,
+                      until: float) -> list[tuple[float, float]]:
+        sa, t = self.sa, self.samples
+        q = (sa.select(t.c.t, t.c.value).where(t.c.hub == hub, t.c.res == res,
+                                               t.c.metric == metric, t.c.t >= since,
+                                               t.c.t <= until).order_by(t.c.t))
+        with self.engine.connect() as conn:
+            return [(r[0], r[1]) for r in conn.execute(q)]  # (Row.t is the row as a tuple)
+
+    def _prune(self, conn, now: float) -> None:
+        from .analytics import RETENTION
+
+        for res, keep in RETENTION.items():
+            if keep is not None:
+                conn.execute(self.samples.delete().where(self.samples.c.res == res,
+                                                         self.samples.c.t < now - keep))
 
     def record_action(self, entry: dict) -> None:
         """Queue one operator-log entry."""
@@ -109,8 +145,11 @@ class ConnLog:
                 rows.append(r)
             try:
                 with self.engine.begin() as conn:
-                    for table in {id(t): t for t, _ in rows}.values():
+                    for table in {id(t): t for t, _ in rows if t != "prune"}.values():
                         conn.execute(table.insert(), [r for t, r in rows if t is table])
+                    for t, r in rows:
+                        if t == "prune":
+                            self._prune(conn, r)
                 self.written += len(rows)
             except Exception:
                 log.exception("connection log: %d row(s) not written", len(rows))

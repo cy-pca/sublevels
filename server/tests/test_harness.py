@@ -106,3 +106,15 @@ def test_native_operator_functions_need_the_admin_role(harness, server):
         assert admin.call("sublevels.unban", "ip:10.9.8.5")["ok"]
     finally:
         hub.disconnect(s)
+
+
+def test_the_public_user_count_series(harness, server):
+    hub = server.hub
+    hub.analytics.tick()
+    hub.analytics.tick()
+    viewer = harness.connect()
+    got = viewer.get(f"{hub.tree_path}.series.users")
+    assert got is not None and [float(x) for x in str(got).split(",")][-2:] == [0.0, 0.0]
+    admin = harness.client({"id": "joe", "name": "Joe", "roles": ["admin"]})
+    r = admin.call("sublevels.analytics", "users", "10s", "0")
+    assert r["ok"] and r["kind"] == "gauge" and len(r["points"]) >= 2

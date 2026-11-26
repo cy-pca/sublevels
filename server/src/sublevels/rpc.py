@@ -17,7 +17,7 @@ log = logging.getLogger("sublevels.rpc")
 PING = "sublevels.ping"
 # Native operators' functions (P6 §6), each for callers with the admin role.
 OPERATOR = ("sublevels.kick", "sublevels.redirect", "sublevels.ban", "sublevels.unban",
-            "sublevels.bans", "sublevels.info")
+            "sublevels.bans", "sublevels.info", "sublevels.analytics")
 
 
 def available() -> bool:
@@ -70,5 +70,9 @@ def register(service: Service) -> list[str]:
     @op("sublevels.info")
     def info(ctx, target):
         return service.operator_call(ctx.principal, "info", target)
+
+    @op("sublevels.analytics")
+    def analytics(ctx, metric="", resolution="10s", since=""):
+        return service.operator_call(ctx.principal, "analytics", metric, resolution, since)
 
     return [PING, *OPERATOR]
