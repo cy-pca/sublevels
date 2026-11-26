@@ -3,6 +3,9 @@
 - ``GET /healthz``: up, and the version.
 - ``GET /stats``: the live user count, which is public (D14).
 - ``GET /admin/stats``: D14's counters and live values, for operators.
+- ``GET /documents/motd`` and ``GET /documents/rules``: the hub's message of the day and rules
+  (D9), which anyone may read; ``PUT /admin/documents/<name>`` with ``{"text": ..., "by": ...}``
+  replaces one.
 - ``GET /admin/hublists``: the hub-list targets, each registration's result and the pingers'
   visits (P9, D15); ``POST /admin/hublists/register`` registers with every push target now.
 
@@ -14,9 +17,10 @@ from __future__ import annotations
 
 import hmac
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
 
 from . import __version__
+from .nmdc.documents import NAMES, DocumentError
 from .service import Service
 
 
@@ -43,6 +47,22 @@ def create_app(service: Service) -> FastAPI:
     @app.get("/admin/stats", dependencies=[Depends(operator)])
     def admin_stats() -> dict:
         return service.admin_stats()
+
+    def _name(name: str) -> str:
+        if service.hub is None or name not in NAMES:
+            raise HTTPException(404, f"no document {name!r}")
+        return name
+
+    @app.get("/documents/{name}")
+    def document(name: str) -> dict:
+        return service.hub.documents.get(_name(name))
+
+    @app.put("/admin/documents/{name}", dependencies=[Depends(operator)])
+    def set_document(name: str, text: str = Body(...), by: str = Body(default="")) -> dict:
+        try:
+            return service.hub.set_document(_name(name), text, by)
+        except DocumentError as e:
+            raise HTTPException(422, f"{name}: {e}")
 
     @app.get("/admin/hublists", dependencies=[Depends(operator)])
     def admin_hublists() -> dict:
