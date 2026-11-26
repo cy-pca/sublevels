@@ -17,7 +17,18 @@ name: ci
 #           cy-pca/airdcpp-webclient), for the transfers jobs.
 #   transfers  ncdc and that AirDC++ download each other's files through the hub, over NMDC and
 #           NMDCS.
-#   soak    6000 synthetic clients against the hub; memory, CPU and fan-out latency in the summary.
+#   soak    6000 synthetic clients against the hub; memory, CPU, fan-out latency and the ceiling
+#           (broadcasts per second to 6000) in the summary.
+#   bridge-e2e  the room bridge through arisrvx's real host code: an Ariadne client (arigl) and an
+#           NMDC client meet in the conference room and chat both ways.
+#
+# The interop, transfers, soak and bridge-e2e jobs run on both of the hub's plain-NMDC transports
+# (SUBLEVELS_NMDC_TRANSPORT): asyncio, and libcvc's native connection engine (pycvc 4.0.9 from
+# cvcpkg). NMDCS stays on asyncio either way until the engine has TLS (libcvc N3), so a leg's
+# engine coverage is its plain-NMDC connections: interop-ncdc's ncdcA and ncdcC (ncdcB is NMDCS),
+# interop-airdcpp and transfers (nmdc) in full, and in transfers (nmdcs) only the plain session the
+# TLS-only hub turns away. The arisrvx job runs the socket tests on both and smokes the engine as
+# arisrvx's own (host.net).
 #
 # GitHub-hosted runners only: this repository is public, and a pull request's workflows must
 # never reach the self-hosted runners on catx-03.
@@ -60,8 +71,10 @@ jobs:
       SUBLEVELS_REQUIRE_PYCVC: '1'
       # And the ServerHarness tests (libcvc S7, in the set server/ci/install.sh pins).
       SUBLEVELS_REQUIRE_HARNESS: '1'
-      # And the room bridge's harness test (arisrvx's bridged-users API, libcvc 4.0.2).
+      # And the room bridge's harness test (arisrvx's bridged-users API), and the socket tests on
+      # the native connection engine (libcvc 4.0.9).
       SUBLEVELS_REQUIRE_BRIDGE: '1'
+      SUBLEVELS_REQUIRE_ENGINE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-cvcpkg
@@ -72,6 +85,8 @@ jobs:
         run: ~/sublevels-ci/deps/bin/python3.12 -m pytest -rs -p no:cacheprovider
       - name: arisrvx smoke run
         run: bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
+      - name: arisrvx smoke run, plain NMDC on arisrvx's own engine (host.net)
+        run: SUBLEVELS_NMDC_TRANSPORT=engine bash server/ci/smoke.sh ~/sublevels-ci/deps/bin/arisrvx
 
   package:
     # The cvcpkg recipe (recipes/sublevels) built into a prefix beside arisrvx and pycvc from
@@ -104,20 +119,34 @@ jobs:
     # (active, NMDCS, passive) and an observer against the hub run alone, checking login, chat,
     # private messages, search and $SR, and file-list transfers by $ConnectToMe and
     # $RevConnectToMe. The hub's captures and the findings for spec/'s "To capture" items are kept.
+    name: interop-ncdc (${{ matrix.transport }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        transport: [asyncio, engine]
+    env:
+      SUBLEVELS_NMDC_TRANSPORT: ${{ matrix.transport }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: ./.github/actions/setup-cvcpkg
+        if: matrix.transport == 'engine'
+      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+        if: matrix.transport == 'engine'
+        run: |
+          bash server/ci/install.sh ~/sublevels-ci
+          echo "PY=$HOME/sublevels-ci/deps/bin/python3.12" >> "$GITHUB_ENV"
       - name: Install ncdc and tmux (apt)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ncdc tmux
           ncdc --version | head -1
       - name: ncdc interop
-        run: python server/interop/ncdc_interop.py --out "$RUNNER_TEMP/interop"
+        run: ${PY:-python} server/interop/ncdc_interop.py --out "$RUNNER_TEMP/interop"
       - name: Findings
         if: always()
         run: cat "$RUNNER_TEMP/interop/findings.md" >> "$GITHUB_STEP_SUMMARY" || true
@@ -125,7 +154,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: interop-ncdc
+          name: interop-ncdc-${{ matrix.transport }}
           path: ${{ runner.temp }}/interop
           retention-days: 14
 
@@ -134,9 +163,15 @@ jobs:
     # (server/interop/airdcpp_interop.py): set up with its documented command-line options and
     # driven through its documented HTTP API, with an ncdc beside it, checking login, chat, /me,
     # private messages, search and results, and file-list transfers both ways.
+    name: interop-airdcpp (${{ matrix.transport }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        transport: [asyncio, engine]
     env:
+      SUBLEVELS_NMDC_TRANSPORT: ${{ matrix.transport }}
       AIRDCPP_URL: https://web-builds.airdcpp.net/stable/airdcpp_2.14.0_webui-2.14.0_64-bit_portable.tar.gz
       AIRDCPP_SHA256: fe89c40d1bbb11350e5e175f60ca9de325dbc6e5a778024429ba1bdf633bad1a
     steps:
@@ -144,6 +179,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: ./.github/actions/setup-cvcpkg
+        if: matrix.transport == 'engine'
+      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+        if: matrix.transport == 'engine'
+        run: |
+          bash server/ci/install.sh ~/sublevels-ci
+          echo "PY=$HOME/sublevels-ci/deps/bin/python3.12" >> "$GITHUB_ENV"
       - name: Install ncdc and tmux (apt)
         run: |
           sudo apt-get update -qq
@@ -157,7 +199,7 @@ jobs:
           "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" -v
       - name: AirDC++ interop
         run: |
-          python server/interop/airdcpp_interop.py \
+          ${PY:-python} server/interop/airdcpp_interop.py \
             --airdcppd "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" --out "$RUNNER_TEMP/interop"
       - name: Findings
         if: always()
@@ -166,7 +208,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: interop-airdcpp
+          name: interop-airdcpp-${{ matrix.transport }}
           path: ${{ runner.temp }}/interop
           retention-days: 14
 
@@ -200,7 +242,7 @@ jobs:
     # passive) and the AirDC++ web client (cvcpkg's airdcpp-webclient, from the job above) see each
     # other and download each other's files, every file checked by SHA-256, once over plain NMDC
     # and once with every client over NMDCS (keyprint-pinned) against a TLS-only hub.
-    name: transfers (${{ matrix.hub }})
+    name: transfers (${{ matrix.hub }}, ${{ matrix.transport }})
     needs: airdcpp-webclient
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -208,11 +250,21 @@ jobs:
       fail-fast: false
       matrix:
         hub: [nmdc, nmdcs]
+        transport: [asyncio, engine]
+    env:
+      SUBLEVELS_NMDC_TRANSPORT: ${{ matrix.transport }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: ./.github/actions/setup-cvcpkg
+        if: matrix.transport == 'engine'
+      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+        if: matrix.transport == 'engine'
+        run: |
+          bash server/ci/install.sh ~/sublevels-ci
+          echo "PY=$HOME/sublevels-ci/deps/bin/python3.12" >> "$GITHUB_ENV"
       - name: Install ncdc and tmux (apt)
         run: |
           sudo apt-get update -qq
@@ -227,7 +279,7 @@ jobs:
           "$RUNNER_TEMP/airdcpp/bin/airdcppd" -v
       - name: Transfers
         run: |
-          python server/interop/transfers.py ${{ matrix.hub == 'nmdcs' && '--tls' || '' }} \
+          ${PY:-python} server/interop/transfers.py ${{ matrix.hub == 'nmdcs' && '--tls' || '' }} \
             --airdcppd "$RUNNER_TEMP/airdcpp/bin/airdcppd" --out "$RUNNER_TEMP/transfers"
       - name: Findings
         if: always()
@@ -236,34 +288,82 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: transfers-${{ matrix.hub }}
+          name: transfers-${{ matrix.hub }}-${{ matrix.transport }}
           path: ${{ runner.temp }}/transfers
           retention-days: 14
 
   soak:
-    # 6000 synthetic clients (D7) against the hub run alone (server/interop/soak.py): every client
-    # must log in and stay connected. Memory per user, CPU and fan-out latency go to the summary.
+    # 6000 synthetic clients (D7) against the hub run alone (server/interop/soak.py), on each of its
+    # plain-NMDC transports: every client must log in and stay connected. Memory per user, CPU,
+    # fan-out latency and the ceiling (2000 chat lines back to back; broadcasts per second to every
+    # user) go to the summary.
+    name: soak (${{ matrix.transport }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        transport: [asyncio, engine]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: ./.github/actions/setup-cvcpkg
+        if: matrix.transport == 'engine'
+      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+        if: matrix.transport == 'engine'
+        run: |
+          bash server/ci/install.sh ~/sublevels-ci
+          echo "PY=$HOME/sublevels-ci/deps/bin/python3.12" >> "$GITHUB_ENV"
       - name: Soak, 6000 users
         run: |
           ulimit -n 65536
-          python server/interop/soak.py --users 6000 --workers 3 --ramp 300 --chat 30 --out "$RUNNER_TEMP/soak"
+          ${PY:-python} server/interop/soak.py --users 6000 --workers 3 --ramp 300 --chat 30 \
+            --ceiling 2000 --transport ${{ matrix.transport }} --out "$RUNNER_TEMP/soak"
       - name: Results
         if: always()
-        run: |
-          { echo '## Soak'; echo '```json'
-            python -c "import json,sys; r=json.load(open(sys.argv[1])); [r.pop(k, None) for k in ('samples',)]; print(json.dumps(r, indent=1))" "$RUNNER_TEMP/soak/soak.json"
-            echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+        run: python server/ci/soak_summary.py "$RUNNER_TEMP/soak/soak.json" >> "$GITHUB_STEP_SUMMARY" || true
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: soak
+          name: soak-${{ matrix.transport }}
           path: ${{ runner.temp }}/soak
+          retention-days: 14
+
+  bridge-e2e:
+    # The room bridge through libcvc's real host code (server/interop/bridge_e2e.py): `sublevels
+    # serve` (arisrvx 4.0.9, the bridged-users API) with an NMDC client "zed", and an Ariadne client
+    # (arigl 4.0.9 in conference mode running server/interop/bridge_client.ari, under cvcpkg's Xvfb
+    # and Mesa) in the same room: the room lists zed, chat goes both ways, and a direct message
+    # gets its reply.
+    name: bridge-e2e (${{ matrix.transport }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        transport: [asyncio, engine]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-cvcpkg
+      - name: Install arisrvx, pycvc and arigl 4.0.9, Xvfb and Mesa (cvcpkg)
+        run: ARIGL=1 bash server/ci/install.sh ~/sublevels-ci
+      - name: Xvfb
+        run: |
+          ~/sublevels-ci/deps/bin/Xvfb :99 -screen 0 1280x1024x24 > "$RUNNER_TEMP/xvfb.log" 2>&1 &
+          for _ in $(seq 1 50); do [ -e /tmp/.X11-unix/X99 ] && break; sleep 0.2; done
+          [ -e /tmp/.X11-unix/X99 ] || { cat "$RUNNER_TEMP/xvfb.log"; exit 1; }
+          printf '%s\n' DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe >> "$GITHUB_ENV"
+      - name: The room bridge, end to end
+        run: |
+          ~/sublevels-ci/deps/bin/python3.12 server/interop/bridge_e2e.py \
+            --prefix ~/sublevels-ci/deps --transport ${{ matrix.transport }} --out "$RUNNER_TEMP/bridge"
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-e2e-${{ matrix.transport }}
+          path: ${{ runner.temp }}/bridge
           retention-days: 14

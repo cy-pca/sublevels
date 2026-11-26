@@ -1,0 +1,61 @@
+# An Ariadne participant of the room the sublevels hub bridges its NMDC users into (the room bridge,
+# server/src/sublevels/bridge.py, on arisrvx's bridged-users API). interop/bridge_e2e.py runs it with
+# `arigl snapshot` in conference mode (CVC_ARIADNE_RELAY=URL, CVC_ARIADNE_ROOM=<the hub's room>,
+# CVC_ARIADNE_NAME=Alice) against `sublevels serve`, while an NMDC client "zed" is in the hub.
+#
+# It joins the room, finds zed in the roster as a bridged NMDC user, reads zed's main-chat line in
+# the room's chat, posts to the room and reads zed's answer (sent from NMDC after zed saw the post as
+# <[room]Alice>), sends zed a direct message and reads the reply. It prints "bridge_e2e: ok" and
+# quits 0; running out of its frame budget quits 1, saying where it was.
+meta: { name: a room participant beside the NMDC hub's users, min_libcvc: 4.0.9 }
+requires: [room-join, room-roster, chat-post, chat-messages]
+functions: |
+  (defun t-phase (p) (state-set "t.phase" p) (print (str-concat "bridge_e2e: phase " p)))
+  ; The text of the room's last message (or of the conversation with PEER), "" for none.
+  (defun t-last (peer)
+    (chat-info (state-get "t.tok") peer)
+    (set ms (chat-messages (state-get "t.tok") peer))
+    (if (= (length ms) 0) "" (get-attr (nth ms (- (length ms) 1)) "text")))
+  ; Whether any message of the room's has TEXT.
+  (defun t-has (text)
+    (chat-info (state-get "t.tok") "")
+    (set hit #f)
+    (for m (chat-messages (state-get "t.tok") "")
+      (if (= (get-attr m "text") text) (set hit #t)))
+    hit)
+init: |
+  (state-set "t.frames" 0)
+  (state-set "t.zed" "_nmdc_zed")
+  (t-phase "join")
+on_tick: |
+  (state-set "t.frames" (+ 1 (int (state-get "t.frames"))))
+  (if (> (int (state-get "t.frames")) 3000)
+      (begin
+        (print (str-concat "bridge_e2e: gave up at phase " (str (state-get "t.phase"))
+                           ", relay.status " (str (state-get "relay.status"))))
+        (quit 1)))
+  (if (= (state-get "t.phase") "join")
+      (begin
+        (state-set "t.tok" (get-attr (room-join "" (state-get "conf.room") (dict "name" (state-get "conf.self"))) "token"))
+        (t-phase "roster")))
+  (if (= (state-get "t.phase") "roster")
+      (for u (room-roster (state-get "t.tok") "bridged")
+        (if (= (get-attr u "pid") (state-get "t.zed"))
+            (begin
+              (assert (= (get-attr u "name") "zed") u)
+              (assert (= (get-attr u "bridged") "1") u)
+              (assert (= (get-attr u "via") "nmdc") u)
+              (t-phase "heard")))))
+  (if (and (= (state-get "t.phase") "heard") (t-has "hello from NMDC"))
+      (begin
+        (assert (get-attr (chat-post (state-get "t.tok") "hello from the room") "ok"))
+        (t-phase "answer")))
+  (if (and (= (state-get "t.phase") "answer") (t-has "zed saw: hello from the room"))
+      (begin
+        (assert (get-attr (chat-post (state-get "t.tok") "psst" (state-get "t.zed")) "ok"))
+        (t-phase "dm")))
+  (if (and (= (state-get "t.phase") "dm") (= (t-last (state-get "t.zed")) "psst back"))
+      (begin
+        (print "bridge_e2e: ok")
+        (t-phase "done")
+        (quit 0)))
