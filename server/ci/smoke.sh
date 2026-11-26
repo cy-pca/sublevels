@@ -103,10 +103,11 @@ if grep -q "Traceback" "$log"; then fail "a traceback in arisrvx's log"; fi
 grep -q "publishing sublevels.server" "$log" || fail "the service did not report publishing"
 # Plain NMDC's transport: on the native engine when asked for (engine), and by default (auto) on a
 # host that has it (SUBLEVELS_REQUIRE_ENGINE=1 says this one must); on asyncio when asked for.
+# On the engine it must be arisrvx's own (host.net), not a second one the hub made.
 case "${SUBLEVELS_NMDC_TRANSPORT:-auto}" in
-  engine) grep -q "listening for nmdc on .* (native engine" "$log" || fail "plain NMDC is not on the native engine" ;;
+  engine) grep -q "listening for nmdc on .* (native engine, .* the host's)" "$log" || fail "plain NMDC is not on arisrvx's engine (host.net)" ;;
   auto) if [[ "${SUBLEVELS_REQUIRE_ENGINE:-}" == 1 ]]; then
-          grep -q "listening for nmdc on .* (native engine" "$log" || fail "the default transport did not pick the native engine"
+          grep -q "listening for nmdc on .* (native engine, .* the host's)" "$log" || fail "the default transport did not pick arisrvx's engine (host.net)"
         fi ;;
   asyncio) if grep -q "listening for nmdc on .* (native engine" "$log"; then fail "SUBLEVELS_NMDC_TRANSPORT=asyncio, but plain NMDC is on the engine"; fi ;;
 esac

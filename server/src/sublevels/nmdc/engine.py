@@ -169,6 +169,6 @@ def start_engine_listener(hub: Hub, net=None, *, io_threads: int = 2) -> EngineL
             why = _REASONS.get(reason, f"engine: {reason}")
         hub.disconnect(s, why)
 
-    log.info("NMDC: listening for nmdc on %s:%d (native engine, %d I/O threads)", address,
-             listener.port, net.io_threads())
+    log.info("NMDC: listening for nmdc on %s:%d (native engine, %d I/O threads, %s)", address,
+             listener.port, net.io_threads(), "its own" if own else "the host's")
     return out
