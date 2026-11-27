@@ -20,6 +20,7 @@ import os
 import re
 import secrets
 import time
+import zlib
 from collections import Counter, deque
 from typing import Any, Callable, Protocol
 
@@ -597,7 +598,7 @@ class Hub:
             self._refuse_ban(s, ban)
             return
         s.nick, s.key = nick, nick_key(nick)
-        self.send(s, f"$Supports {HUB_SUPPORTS}|")
+        self.send(s, f"$Supports {HUB_SUPPORTS}{' ZPipe0' if self.config.zpipe != 'off' else ''}|")
         if registered:
             if self.config.password_requires_tls and not s.tls:
                 where = f" at {self.nmdcs_url()}" if self.config.nmdcs_address else ""
@@ -870,7 +871,20 @@ class Hub:
                 parts.append(self._enc(f"$UserIP {ips}|"))
             else:
                 parts.append(self._enc(f"$UserIP {s.nick} {s.ip}|"))
-        self._write(s, b"".join(parts))
+        self._write(s, self._maybe_zpipe(s, b"".join(parts)))
+
+    def _maybe_zpipe(self, s: Session, data: bytes) -> bytes:
+        """``data`` as one ZPipe0 block for a client that listed ZPipe0 (P7 §3), when the hub is
+        set to compress and ``data`` is large enough; else as it is."""
+        mode = self.config.zpipe
+        if mode == "off" or "ZPipe0" not in s.supports or len(data) < self.config.zpipe_min:
+            return data
+        z = zlib.compress(data, 6)  # one complete stream: its end returns to plain messages
+        self.counters.add("zpipe_blocks")
+        self.counters.add("zpipe_saved", len(data) - len(z))
+        if mode == "zon-blob":  # the probe's other framing: no client takes it
+            return b"$ZOn " + z + b"|"
+        return b"$ZOn|" + z  # "on" (or "zon")
 
     def _nicklist(self) -> bytes:
         nicks = [self.config.bot_nick] + [u.nick for u in self.users.values()]

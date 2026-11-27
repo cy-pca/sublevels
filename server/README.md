@@ -21,6 +21,7 @@ ARIADNE_SCRIPTING_HOSTS.md §6.5) on the host's one asyncio loop. It is an NMDC 
 | `interop/airdcpp_interop.py` | The AirDC++ web client as a black box, through its documented HTTP API |
 | `interop/transfers.py` | ncdc and AirDC++ download each other's files through the hub, over NMDC or NMDCS |
 | `interop/eiskaltdcpp_interop.py` | EiskaltDC++ through its JSON-lines driver (`eiskaltdcpp-interop`, cvcpkg `eiskaltdcpp-py-cp312`): login, users, chat, PMs, search and downloads both ways, a wrong keyprint, and an operator's redirect and kick (P6) |
+| `interop/zpipe_probe.py` | Which ZPipe0 framing AirDC++ and EiskaltDC++ take (P7 §3): the login user list compressed each way, checked by who the client sees and its chat afterwards |
 | `interop/soak.py` | Synthetic clients toward 6000+ (D7): memory, CPU, fan-out latency and the broadcasts-per-second ceiling, on either transport |
 | `interop/bridge_e2e.py`, `interop/bridge_client.ari` | The room bridge end to end: an Ariadne client (arigl) and an NMDC client in the conference room, on real arisrvx |
 | `bin/sublevels` | The `sublevels` command: the relay, the hub, the HTTP API and TX.WTF in one arisrvx |
