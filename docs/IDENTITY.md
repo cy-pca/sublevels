@@ -70,7 +70,8 @@ On the relay a signed-in connection's principal is:
  "session": "<session uuid>"}
 ```
 
-A guest has no principal of its own (3.2). sublevels keeps no identity store (D9 holds): the
+A guest's principal is `guest:<client id>`, the same each time the same machine comes back (3.8).
+sublevels keeps no identity store (D9 holds): the
 account is TX.WTF's, the device proof is the relay's, and the hub's own file of accounts stays
 only for a hub run with `--txwtf off`.
 
@@ -96,10 +97,11 @@ bearer (3.5). The hook sorts the bearer by its shape:
   storm at TX.WTF. A session token goes only to a relay run by the TX.WTF's own operator (section
   5).
 
-**Guests.** A guest verdict admits the connection with its pid as its principal, as a relay
-without a hook does today. Its registry record (its client id, device-backed when the key is
-proved) is what identifies it. Giving every guest one shared principal would put all guests under
-one set of call limits. This needs a small libcvc change (L1).
+**Guests.** A guest verdict admits the connection, and the relay makes its principal
+`guest:<client id>` once the Hello gives the device id (3.8). Call limits, bans and throttles then
+follow the guest across reconnects. A pid would be new on every connection. One principal shared by
+all guests would put them all under one set of call limits. This needs a libcvc change (L1),
+because the hook runs before the Hello and can't see the device id.
 
 **Names.** A signed-in connection's registry username is the account's username. The relay
 writes it, and the client can't rename it (`server.set` refuses). A guest is `guest-<hex>`, and
@@ -244,7 +246,58 @@ disabled (3.3).
   the room** stay bridged users. Their detail says whether the user logged in to an account
   (then the TX.WTF profile is one click away, CLIENT_UI §4.2) or is a guest.
 
-### 3.8 What a guest sees
+### 3.8 Guests are the same guest each time
+
+Joe, 2026-11-26: guests get semi-stable ids, so a guest who comes back from the same machine (its
+hardware, OS user and addresses, whatever makes the hash) gets the same id. Repeat guests can then
+be tracked, banned and throttled across all three parts.
+
+**The id** is the registry's client id (ARISRV_IDENTITY 2.1), computed once for the host and used
+by all three parts:
+
+| Who | Their guest id is made from | Stable across |
+|---|---|---|
+| a native client (the sublevels app, cyprty in `arigl`, `ari`) | the device id: OS machine id, host name and OS user, scoped to the relay | reconnects, restarts of the client, new networks (addresses aren't hashed in, ARISRV D1) |
+| a browser page | the random device id it keeps in `localStorage` | reconnects, until site data is cleared |
+| a vanilla NMDC client, or a page with no storage | the fallback: its public and local addresses | reconnects from the same addresses |
+| a TX.WTF guest over HTTP (T5) | the same fallback, from the request's address, with the local address empty (as a browser sends it) | requests from the same address |
+
+**What has to change for it to hold:**
+
+- **One salt that survives restarts.** Today the relay's salt is random in each process, so every
+  id changes when arisrvx restarts. ARISRV_IDENTITY plans `--identity-salt-file`, which isn't
+  built yet (L5). The sublevels host keeps the file with its data, and the hub and TX.WTF hash
+  with the same salt. The device-key pins already persist (`--device-pins`), and the host must
+  use them too.
+- **A guest's principal is its id** (3.2, L1), and its name follows from it: `guest-<first 4 hex>`,
+  which the registry already gives back to a returning id.
+- **No borrowing another guest's id.** A device id is an identifier, not a credential. A client
+  that sends a device id pinned to a different key is refused the proof today, but keeps the id.
+  For a guest it must not: it gets the address fallback instead. Otherwise anyone could take, or
+  get banned in place of, another guest's record (L5).
+- **One guest list for the host.** Today the registry keeps records for one run and its bans in
+  memory, and the hub keeps its own bans (P6). The sublevels service keeps the lasting record: the
+  connection log it already writes (D13), with the guest id on every row from every part, and one
+  ban and throttle list keyed by guest id, address and range. It applies the list:
+  - on the relay, through the guest verdict (a banned id is refused, a throttled one gets lower
+    call limits), and by restoring its bans into the registry at start (`host.clients.ban` from
+    Python, L6);
+  - on the hub, at accept (`open_engine` already returns a refusal for a banned id) and in P6's
+    commands, which ban by id;
+  - in TX.WTF, for anonymous requests: an embedded TX.WTF asks the service in process, and an
+    external one through the admin API (T5).
+- **Where one machine has two ids.** A native client is known by its device id. DC++ on the same
+  machine is known only by its addresses, and the two hashes differ. They're linked through the
+  connection log, which keeps the addresses every id came from. So a guest ban covers the id and
+  the addresses it was last seen at, as D9 already does for NMDC users. The admin view lists the
+  other ids seen at those addresses.
+
+**Semi-stable, not a credential.** A guest who changes the inputs (another OS user, a new
+`CVC_DEVICE_ID`, cleared site data, a VPN) gets a new id. That is why bans also cover addresses
+and ranges. A signed-in user is tracked by their account (3.1), and their client id only says which
+device.
+
+### 3.9 What a guest sees
 
 | Part | A guest | Signed in |
 |---|---|---|
@@ -304,18 +357,20 @@ guest password is ID2's), and `allow_guests` on the hub. TX.WTF gets `allow_anon
   revoked sessions (2). The helper (T1) always checks the row.
 - **Hub passwords** are scoped (`nmdc`) and revocable, and shown once. They're checked in constant
   time, and limited on both sides.
-- **Privacy.** A guest's client id never reaches TX.WTF. An account's devices and addresses stay
-  in the relay's private registry and the connection log (D13). The roadmap's retention question
-  covers both.
+- **Privacy.** Guest ids are salted with the host's salt, so another operator's relay can't match
+  them. Inside the host, the relay, the hub and TX.WTF share them by design (3.8). Devices,
+  addresses and guest ids stay in the relay's private registry and the service's connection log
+  (D13). Users never see them, and operators see them in the admin view. The roadmap's retention
+  question covers all of these, and the salt file is as sensitive as the log.
 
 ## 6. The work, in phases
 
 | Phase | Repo | What |
 |---|---|---|
 | I0 | sublevels | This note |
-| I1 | txwtf | **T1** a public helper that verifies a session token in process and returns `{user_id, username, groups, session}`, and service-authenticated routes for an external relay and hub: a batch session check and a username lookup. **T3** a username rule for new accounts. |
-| I1 | libcvc | **L1** a guest verdict from `@host.authenticate` (admitted with its pid as principal), and `cred.secure`. **L2** a verdict's `username`, set by the relay, which `server.set` can't change, and a principal's account on the registry record and in `server.whoami`. **L3** `name_engine` takes an account. **L4** arigl's conference client takes its bearer from a credential (check first). With the identity session (#1565, ID4c) |
-| I2 | sublevels | The authenticate hook (embedded and external), the re-check task, groups to roles, the public TX.WTF URL (**S1**), `guests:` settings, and `host.read_scope` for operator analytics. Tests: `ServerHarness` with an in-process txwtf and a stub external one |
+| I1 | txwtf | **T1** a public helper that verifies a session token in process and returns `{user_id, username, groups, session}`, and service-authenticated routes for an external relay and hub: a batch session check and a username lookup. **T3** a username rule for new accounts. **T5** a guest id for anonymous requests (the address fallback, with the host's salt) in its request log and rate limits, checked against the service's guest list |
+| I1 | libcvc | **L1** a guest verdict from `@host.authenticate`, whose principal the relay sets to `guest:<client id>` after the Hello, and `cred.secure`. **L2** a verdict's `username`, set by the relay, which `server.set` can't change, and a principal's account on the registry record and in `server.whoami`. **L3** `name_engine` takes an account. **L4** arigl's conference client takes its bearer from a credential (check first). **L5** `--identity-salt-file`, and a guest whose device id is pinned to another key gets the address fallback. **L6** `host.clients.ban` / `unban` from Python. With the identity session (#1565, ID4c) |
+| I2 | sublevels | The authenticate hook (embedded and external), the re-check task, groups to roles, the public TX.WTF URL (**S1**), `guests:` settings, the guest id in the connection log and one guest ban and throttle list for the relay, the hub and TX.WTF (3.8), and `host.read_scope` for operator analytics. Tests: `ServerHarness` with an in-process txwtf and a stub external one |
 | I3 | txwtf | **T2** app passwords: the model, the API, the settings page, the in-process check, and the service-authenticated check route |
 | I3 | sublevels | `TxwtfAccounts` on T2, the asynchronous `$MyPass` check, reserved account names at `$ValidateNick`, revocation closing logins, and the account or guest in the bridge's detail. Interop: ncdc logs in with a hub password over NMDCS |
 | I4 | nicotina | `adopt` and `guest` (nicotina#46 3.7, 3.8) |
@@ -324,7 +379,7 @@ guest password is ID2's), and `allow_guests` on the hub. TX.WTF gets `allow_anon
 | I5 | txwtf (deploy) | The sublevels app's OIDC client and a txwtf with the device grant on the host's site (Joe's call, as nicotina's CD-5) |
 | later | txwtf, libcvc | **T4** `allow_anonymous_browsing` and a public profile route (nicotina's CD-7). An audience-bound relay token (M7). TX.WTF listing the devices an account used on the relay |
 
-I1's two halves run in parallel. I2 needs T1, L1 and L2; I3 needs T2. I5 needs I2 and I4. Until
+I1's two halves run in parallel. I2 needs T1, L1, L2, L5 and L6; I3 needs T2. I5 needs I2 and I4. Until
 I2, the relay stays as it is: every client is a guest, named by itself.
 
 ## 7. Not in scope
@@ -343,8 +398,9 @@ I2, the relay stays as it is: every client is a guest, named by itself.
 | ID-D2 | What the client shows the relay | **Its TX.WTF session token**, the one nicotina adopts, verified in process when TX.WTF is embedded and by `GET /user/` when it is external. Only the relay's own TX.WTF; an audience-bound token for other operators' relays later (5). |
 | ID-D3 | NMDC logins | **A hub password the TX.WTF account issues** (txwtf app passwords, scoped `nmdc`, shown once, revocable), with the TX.WTF username as the nick, over TLS. The hub never stores it. |
 | ID-D4 | Account names | **Reserved everywhere** for their account, online or not. txwtf adds a nick-safe rule for new usernames, and older names get a derived form. |
-| ID-D5 | Guest names | `guest-<hex>` on the relay, which a guest can't change. Any free nick that isn't an account's on the hub (NMDC's way). |
-| ID-D6 | What guests may do | As in 3.8. TX.WTF: public reads. Rooms: enter, chat, audio and video. Hub: chat, search and downloads; relay-mode transfers and operator tools need an account. Each part can turn guests off. |
+| ID-D5 | Guest names | `guest-<hex>` on the relay, from the guest's id, so a returning guest gets it back and can't change it. Any free nick that isn't an account's on the hub (NMDC's way). |
+| ID-D6 | What guests may do | As in 3.9. TX.WTF: public reads. Rooms: enter, chat, audio and video. Hub: chat, search and downloads; relay-mode transfers and operator tools need an account. Each part can turn guests off. |
 | ID-D7 | Roles | From TX.WTF groups named in the sublevels config, re-read every minute. rcon stays as the fallback. |
 | ID-D8 | The client's OIDC client | **Its own** first-party public client, `sublevels`, at the host's site, so TX.WTF's sessions screen names the app. Not nicotina's. The password form (nicotina's `signin`) until the site has one. |
 | ID-D9 | Sign-out | **One Sign out for all three** (3.6), with **Continue as a guest**. A session ended elsewhere drops the relay within a minute. |
+| ID-D10 | Guest ids (Joe, 2026-11-26: semi-stable, the same on reconnect from the same machine) | **The registry's client id, with a salt kept across restarts, shared by the relay, the hub and TX.WTF** (3.8). It's the device id where the client sends one, and the addresses otherwise. One guest ban and throttle list for all three parts, kept by the sublevels service. |
