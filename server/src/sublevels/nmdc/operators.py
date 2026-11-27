@@ -233,11 +233,20 @@ class Operators:
         if sigil == "+" and cmd == "help" or sigil == "!" and cmd == "help":
             lines = ["Commands:"]
             lines += [f"{c}  {what}" for r, c, what in HELP if RANK[role] >= RANK[r]]
+            if hub.hublist is not None:
+                lines.insert(4, "+hublist [filter]  the hubs this server lists")
             if hub.geo.enabled:
                 lines.append(hub.geo.status()["attribution"])
             return lines
         if sigil == "+" and cmd in ("motd", "rules"):
             return hub.documents.lines(cmd) or ["(none yet)"]
+        if sigil == "+" and cmd == "hublist" and hub.hublist is not None:
+            hubs = hub.hublist.listed(rest, limit=20)
+            if not hubs:
+                return ["No listed hubs" + (f" match {rest!r}." if rest else " yet.")]
+            return [f"{hub.hublist.cfg.name}: {len(hubs)} hub(s), most users first"] + [
+                f"{r.get('name') or '?'}  {r['address']}  {int(r.get('users') or 0)} users"
+                + (f"  {r['country']}" if r.get("country") else "") for r in hubs]
         if sigil == "!":
             args = rest.split(" ")
             if cmd == "kick":

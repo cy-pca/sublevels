@@ -17,7 +17,8 @@
   ``/hublist-<cc>.xml.bz2``, with ``ETag`` and ``Last-Modified``; and for operators
   ``GET /admin/hublist`` (the entries, by ``state``), ``PUT /admin/hublist/state`` (``{"address",
   "state"}``: listed, hidden, banned...), ``DELETE /admin/hublist/entry?address=`` and
-  ``POST /admin/hublist/ping`` (``{"address"}``: ping it now).
+  ``POST /admin/hublist/ping`` (``{"address"}``: ping it now) and ``POST /admin/hublist/mirrors``
+  (fetch the mirrors now).
 - ``GET /admin/hublists``: the hub-list targets, each registration's result and the pingers'
   visits (P9, D15); ``POST /admin/hublists/register`` registers with every push target now.
 
@@ -192,6 +193,10 @@ def create_app(service: Service) -> FastAPI:
         except ValueError as err:
             raise HTTPException(422, str(err))
         return {"ok": True}
+
+    @app.post("/admin/hublist/mirrors", dependencies=[Depends(operator)])
+    async def admin_hublist_mirrors() -> dict:
+        return await _hublist().mirror_once()
 
     @app.post("/admin/hublist/ping", dependencies=[Depends(operator)])
     async def admin_hublist_ping(address: str = Body(..., embed=True)) -> dict:

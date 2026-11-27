@@ -8,6 +8,11 @@ Off by default. ``SUBLEVELS_HUBLIST=on`` turns it on; it then needs somewhere to
   and in its pinger's ``$BotINFO``
 - ``SUBLEVELS_HUBLIST_CHECK_KEY=0``: accept registrations whatever their ``$Key``
 - ``SUBLEVELS_HUBLIST_PINGER_NICK``: the pinger's nick (default sublevels-pinger)
+- ``SUBLEVELS_HUBLIST_MIRRORS``: other lists' XML URLs to merge, comma-separated (none by default)
+
+The instance's own hub, when it has a public address, is an entry without a push (P10 §3: the
+cluster's own hubs; until hubs are linked, D10, the cluster is this one). The listed hubs are also
+published under ``sublevels.hublist`` for native clients, and the hub's ``+hublist`` reads them.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import random
 import time
 from dataclasses import dataclass
 
-from . import pinger
+from . import mirror, pinger
 from .listxml import Lists
 from .register import RegistrationServer
 from .store import STATES, Store, normalise
@@ -31,6 +36,8 @@ PING_JITTER = 300.0
 BACKOFF = (3600.0, 7200.0, 14400.0)  # 1, 2, then 4 hours (P10 §2)
 CONCURRENCY = 8
 SCAN_EVERY = 15.0
+MIRROR_EVERY = 3600.0
+PUBLISHED = 200  # listed hubs in the published tree, most users first
 
 
 @dataclass(frozen=True)
@@ -42,6 +49,7 @@ class HublistConfig:
     url: str = ""
     check_key: bool = True
     pinger_nick: str = "sublevels-pinger"
+    mirrors: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, env=None, data_dir: str = "") -> "HublistConfig":
@@ -59,12 +67,14 @@ class HublistConfig:
                    name=env.get("SUBLEVELS_HUBLIST_NAME") or cls.name,
                    url=env.get("SUBLEVELS_HUBLIST_URL", ""),
                    check_key=on("SUBLEVELS_HUBLIST_CHECK_KEY", True),
-                   pinger_nick=env.get("SUBLEVELS_HUBLIST_PINGER_NICK") or cls.pinger_nick)
+                   pinger_nick=env.get("SUBLEVELS_HUBLIST_PINGER_NICK") or cls.pinger_nick,
+                   mirrors=tuple(u.strip() for u in env.get("SUBLEVELS_HUBLIST_MIRRORS", "")
+                                 .split(",") if u.strip()))
 
 
 class Hublist:
     def __init__(self, cfg: HublistConfig, *, geo=None, clock=time.time, rand=random.random,
-                 pinger_fn=None):
+                 pinger_fn=None, tree=None, own: str = "", fetch_fn=None):
         if not cfg.db:
             raise ValueError("SUBLEVELS_HUBLIST=on needs SUBLEVELS_HUBLIST_DB or a data "
                              "directory for its entries")
@@ -76,6 +86,10 @@ class Hublist:
         self.registrar = RegistrationServer(self.store, check_key=cfg.check_key,
                                             on_registered=lambda e: None)
         self.pinger_fn = pinger_fn or pinger.ping
+        self.fetch_fn = fetch_fn or mirror.fetch
+        self.tree = tree  # where the listed hubs are published (a Host), or None
+        self.own = own  # this instance's hub's public address, "" for none
+        self.mirror_results: dict[str, dict] = {}
         self.inflight: set[str] = set()
         self.sem = asyncio.Semaphore(CONCURRENCY)
         self.tasks: list[asyncio.Task] = []
@@ -124,12 +138,86 @@ class Hublist:
 
     # -- lifecycle ---------------------------------------------------------------------------------
 
+    # -- mirrors and the instance's own hub ------------------------------------------------------
+
+    async def mirror_once(self) -> dict:
+        for url in self.cfg.mirrors:
+            try:
+                xml = await asyncio.to_thread(self.fetch_fn, url)
+                got = mirror.merge(self.store, mirror.parse(xml), f"mirror:{url}")
+                got["ok"] = True
+                log.info("hublist: mirror %s: %d new, %d known", url, got["added"], got["known"])
+            except mirror.MirrorError as e:
+                got = {"ok": False, "error": str(e)}
+                log.warning("hublist: mirror %s: %s", url, e)
+            got["at"] = round(self.clock(), 3)
+            self.mirror_results[url] = got
+        return dict(self.mirror_results)
+
+    async def run_mirrors(self) -> None:
+        while True:
+            await self.mirror_once()
+            await asyncio.sleep(MIRROR_EVERY)
+
+    def include_own(self) -> None:
+        if not self.own:
+            return
+        try:
+            address = normalise(self.own)
+        except ValueError:
+            log.warning("hublist: the hub's own address %r is not a hub address", self.own)
+            return
+        if self.store.get(address) is None:
+            self.store.register(address, "self", {"name": "", "users": 0, "share": 0})
+            log.info("hublist: listing this instance's own hub, %s", address)
+
+    # -- for native clients and the hub's +hublist ------------------------------------------------
+
+    def listed(self, text: str = "", limit: int = PUBLISHED) -> list[dict]:
+        """Listed hubs, most users first, filtered by ``text`` in the name, description or
+        address."""
+        rows = self.store.all("listed")
+        if text:
+            t = text.casefold()
+            rows = [r for r in rows if t in " ".join(str(r.get(k) or "") for k in
+                                                     ("name", "description", "address")).casefold()]
+        rows.sort(key=lambda r: -(r.get("users") or 0))
+        return rows[:limit]
+
+    def publish(self) -> None:
+        if self.tree is None:
+            return
+        hubs = {}
+        for i, r in enumerate(self.listed()):
+            rel = self.store.reliability(r["address"])
+            hubs[f"h{i}"] = {"name": r.get("name") or "", "address": r["address"],
+                             "description": r.get("description") or "",
+                             "users": int(r.get("users") or 0), "share": int(r.get("share") or 0),
+                             "country": r.get("country") or "", "kp": r.get("kp") or "",
+                             "reliability": round(rel, 1) if rel is not None else -1}
+        from .. import NAMESPACE
+        self.tree.set_tree(f"{NAMESPACE}.hublist", {"name": self.cfg.name, "url": self.cfg.url,
+                                                     "count": len(hubs), "hubs": hubs})
+
+    async def run_publish(self) -> None:
+        while True:
+            try:
+                self.publish()
+            except Exception:
+                log.exception("hublist: publishing the list failed")
+            await asyncio.sleep(self.lists.every)
+
     async def start(self) -> None:
+        self.include_own()
         if self.cfg.listen != "off":
             host, _, port = self.cfg.listen.rpartition(":")
             self.port = await self.registrar.start(host.strip("[]") or "0.0.0.0", int(port))
             log.info("hublist: taking registrations on %s:%d", host or "0.0.0.0", self.port)
-        self.tasks.append(asyncio.get_running_loop().create_task(self.run_pings()))
+        loop = asyncio.get_running_loop()
+        self.tasks.append(loop.create_task(self.run_pings()))
+        self.tasks.append(loop.create_task(self.run_publish()))
+        if self.cfg.mirrors:
+            self.tasks.append(loop.create_task(self.run_mirrors()))
         log.info("hublist: %s, %d entries", self.cfg.name, len(self.store.all()))
 
     async def close(self) -> None:
@@ -168,4 +256,5 @@ class Hublist:
         for e in self.store.all():
             by[e["state"]] = by.get(e["state"], 0) + 1
         return {"name": self.cfg.name, "entries": by,
-                "registrations": dict(self.registrar.counts), "port": self.port}
+                "registrations": dict(self.registrar.counts), "port": self.port,
+                "mirrors": dict(self.mirror_results), "own": self.own or None}
