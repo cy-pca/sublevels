@@ -1,7 +1,8 @@
 # The sublevels client UI: plan
 
-Status: draft for Joe's review (2026-11-26). This plans the Ariadne client in `client/` (roadmap M3
-and M4) as a set of components. It does not change the roadmap's decisions.
+Status: decided (Joe, 2026-11-26: "go with the recommended decisions"). This plans the Ariadne
+client in `client/` (roadmap M3 and M4) as a set of components. It does not change the roadmap's
+decisions.
 
 ## 1. What it is
 
@@ -173,9 +174,11 @@ Splits that resize already exist (§5.8's row-split panes), and so do `tabs:`, `
 
 Every step ships `ari snapshot` tests in FTXUI and tvision, plus `arigl`, with the fake adapter.
 
-## 7. Decisions for Joe
+## 7. Decisions (Joe, 2026-11-26)
 
-| # | Question | Proposed |
+All taken as proposed.
+
+| # | Question | Decided |
 |---|---|---|
 | CU-D1 | The layout reference | eiskaltdcpp-qt6, through a black-box layout spec (§2). Nothing converted from its source enters sublevels. |
 | CU-D2 | cyconv's part | its widget gap list drives U1-U7 as shared libcvc work. Its converter runs only on the spec side, when it exists. The client doesn't wait for it. |
