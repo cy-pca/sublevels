@@ -6,9 +6,11 @@ public specifications as Ariadne documents and an `arisrvx` service.
 - **Server.** A `sublevels` service that runs in an `arisrvx` host next to TX.WTF and the
   Ariadne conference rooms. It speaks the hub side of NMDC, so DC++ and the clients derived
   from it can connect. Native Ariadne clients reach the same hub over the arisrvx state plane.
-- **Client.** An Ariadne document component set for the client side of the protocol.
-  [nicotina](https://github.com/cy-pca/nicotina) uses it to reach sublevels hubs natively
-  over arisrvx, and to reach ordinary NMDC hubs.
+- **Client.** The sublevels client: an Ariadne app, written as document components, that reaches
+  sublevels hubs natively over arisrvx and ordinary NMDC hubs. It builds on
+  [nicotina](https://github.com/cy-pca/nicotina)'s TX.WTF components (sign-in, profiles, DMs) and
+  [cyprty](https://github.com/cy-pca/cyprty)'s conference components. nicotina itself stays a TX.WTF
+  client only.
 - **Extensions.** The conference suite's features (channels, calls, media, end-to-end
   encrypted messages) reach hub users. How much of this also goes over the NMDC wire is
   decided in the roadmap.
