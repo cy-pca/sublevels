@@ -14,15 +14,22 @@ The sublevels client is the Direct Connect part of the Ariadne desktop and termi
 - **chat:** a hub's main chat, the user list, and private messages;
 - **admin:** for operators, the NMDC hub's server-side settings and tools (§4.9).
 
-It runs beside two other component sets in one app shell:
+It is its own app, **built on** two other component sets:
 
-- **nicotina's social components** (cy-pca/nicotina: the feed, posts, profiles, TX.WTF DMs);
+- **nicotina's TX.WTF components** (cy-pca/nicotina: sign-in, profiles, the feed and posts, TX.WTF
+  DMs);
 - **cyprty's conference components** (cy-pca/cyprty: rooms, audio and video, avatars).
 
-A user sees one app, signed in once with TX.WTF. A hub user who has a TX.WTF account links to their
+**The dependency runs one way** (Joe, 2026-11-26: "nicotina is really just meant to communicate
+with txwtf, sublevels-client should build on that"):
+- sublevels-client depends on nicotina's and cyprty's components;
+- nicotina depends on nothing from sublevels, and stays a TX.WTF client with no Direct Connect
+  code and no DC host features (raw sockets, share folders, `--net-allow` for hub ports).
+
+A user of the sublevels app sees one app, signed in once with TX.WTF. A hub user who has a TX.WTF account links to their
 nicotina profile, and a hub's main chat can be bridged to a conference room (#17).
 
-The rules nicotina follows apply here too:
+nicotina's rules apply here too:
 
 - **documents only:** no custom host and no compiled-in widget. Every widget or host feature the
   client needs is a generic libcvc feature (§5, and roadmap X1-X9);
@@ -89,9 +96,10 @@ writes the tree from fixtures, and it is how the `ari snapshot` tests run withou
 ## 4. Views
 
 Each is a component in `client/` (`cvc://components/sublevels/<name>`), with a window as a `unit:`
-and its logic as `functions:`, so nicotina's shell, or any app, can mount it.
+and its logic as `functions:`, so the sublevels app, or another app, can mount it.
 
-1. **The shell entry.** A Direct Connect section in nicotina's window, with tabs or a side list:
+1. **The shell.** The sublevels app's window: nicotina's and cyprty's views mounted beside its own, with
+   the Direct Connect views in tabs or a side list:
    Hubs, Search, Transfers, Queue, Finished, File lists, Share, Public hubs, Admin (operators only)
    and Settings. A status bar shows the hubs connected, upload and download speed, and the share
    size and hashing progress.
@@ -182,7 +190,7 @@ All taken as proposed.
 |---|---|---|
 | CU-D1 | The layout reference | eiskaltdcpp-qt6, through a black-box layout spec (§2). Nothing converted from its source enters sublevels. |
 | CU-D2 | cyconv's part | its widget gap list drives U1-U7 as shared libcvc work. Its converter runs only on the spec side, when it exists. The client doesn't wait for it. |
-| CU-D3 | Where the components live | `client/` in cy-pca/sublevels, as `cvc://components/sublevels/*`, shipped by a `sublevels-client` cvcpkg package that nicotina's recipe depends on |
+| CU-D3 | Where the components live | `client/` in cy-pca/sublevels, as `cvc://components/sublevels/*`, shipped by the `sublevels-client` cvcpkg package with its own launcher. **It depends on nicotina's and cyprty's component packages, never the reverse** (Joe's correction, 2026-11-26). This needs nicotina and cyprty to ship their views as mountable components, which is a follow-up in their repos. |
 | CU-D4 | Order | C1 (the admin console) first, then the native hub views |
-| CU-D5 | Composition | mounted into nicotina's window through libcvc's app shell (the mounts work under way in libcvc, "SH1"); cyprty's components are mounted the same way |
+| CU-D5 | Composition | the sublevels app mounts nicotina's TX.WTF views and cyprty's conference views beside its own, through libcvc's app shell (the mounts work under way in libcvc, "SH1") |
 | CU-D6 | Conversations | one list with a source badge on each conversation; no automatic merging of a person's NMDC and TX.WTF conversations |

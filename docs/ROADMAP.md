@@ -6,8 +6,10 @@ sublevels brings Direct Connect into the Ariadne stack. It has two halves:
   Ariadne conference rooms, which will later hold 3D scenes, apps and games. The service speaks
   the hub side of NMDC, so DC++ and the clients derived from it connect unchanged. Ariadne
   clients reach the same hub natively over the arisrvx state plane.
-- **The client.** An Ariadne document component set. [nicotina](https://github.com/cy-pca/nicotina)
-  uses it to reach sublevels hubs natively, and to reach ordinary NMDC hubs.
+- **The client.** The sublevels client, an Ariadne app written as document components. It reaches
+  sublevels hubs natively and ordinary NMDC hubs, and builds on
+  [nicotina](https://github.com/cy-pca/nicotina)'s TX.WTF components and cyprty's conference
+  components. nicotina is only a TX.WTF client and does not depend on sublevels (Joe, 2026-11-26).
 
 Both halves are clean-room implementations; see [CLEANROOM.md](../CLEANROOM.md). Implementers
 work from `spec/` and the public documents it cites, never from eiskaltdcpp, DC++, verlihub or
@@ -20,8 +22,8 @@ D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 
 | # | Decision |
 |---|----------|
 | D1 | **The hub is Python on arisrvx's script loop.** An asyncio NMDC listener (TCP 411, and NMDCS over TLS) runs on the loop arisrvx already gives a program (libcvc ARIADNE_SCRIPTING_HOSTS §6.5; S1 transfix/libcvc#1081, S2 #1122, S5 #1130, S6 #1147, S7). FastAPI runs on the same loop for admin and webhooks. Hub state is published as a `sublevels.*` subtree, and native clients act through `room-call`. The hub carries signalling, chat and search. File transfers are peer to peer, as in NMDC, or for native clients go through the relay (D6). |
-| D2 | **nicotina reaches sublevels natively over the state plane** in every host: `ari` (FTXUI, tvision), `arigl` and the browser. **It reaches vanilla hubs through generic libcvc host features**: TCP and TLS sockets, Tiger-tree hashing, and host-held share and download folders (the X-items below). This keeps nicotina's rule of no custom host and no compiled-in widget. Browsers cannot open raw TCP, so a browser reaches a vanilla hub through a WebSocket-to-TCP gateway in the sublevels service. Sharing and transfers to vanilla peers may be native-only at first. |
-| D3 | **Conference features go native first.** Channels, calls, media and end-to-end encrypted messages reach nicotina over arisrvx, not over NMDC. Extensions on the NMDC wire (`$Supports` flags) come last (M6), and only if third-party or forked clients need them. The first clean-room spec is therefore vanilla NMDC. |
+| D2 | **The sublevels client reaches sublevels natively over the state plane** in every host: `ari` (FTXUI, tvision), `arigl` and the browser. **It reaches vanilla hubs through generic libcvc host features**: TCP and TLS sockets, Tiger-tree hashing, and host-held share and download folders (the X-items below). This keeps nicotina's rule of no custom host and no compiled-in widget. Browsers cannot open raw TCP, so a browser reaches a vanilla hub through a WebSocket-to-TCP gateway in the sublevels service. Sharing and transfers to vanilla peers may be native-only at first. |
+| D3 | **Conference features go native first.** Channels, calls, media and end-to-end encrypted messages reach the sublevels client over arisrvx, not over NMDC. Extensions on the NMDC wire (`$Supports` flags) come last (M6), and only if third-party or forked clients need them. The first clean-room spec is therefore vanilla NMDC. |
 | D4 | **NMDC first, ADC later (M5).** Modern DC++ speaks both protocols. |
 | D5 | **Clean-room workflow.** One spec-writer session may read the GPL implementations, the forks and the private notes archive (transfix/nmdc-dev). It writes `spec/` in its own words and cites its sources. Implementer sessions see only this repository and the public documents. |
 | D6 | **Native clients support every transfer mode:** active (direct), passive, and **relay mode**. In relay mode two clients exchange data through the arisrvx relay, inside an end-to-end encrypted channel. The relay forwards opaque bytes and cannot read them, and neither client learns the other's IP address. Clients behind NAT therefore reach each other without port forwarding. This replaces the abandoned NMDCpb HubRelay extension. Vanilla clients keep NMDC's active and passive modes. |
@@ -43,7 +45,7 @@ D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 
                                                           │
  programs, webhooks, admin ──HTTP/JSON──► uvicorn ──┐     ▼
                                                     ├─► sublevels service (Python, asyncio)
- nicotina, arigl, ari, browser ──room-call──► relay ┘     │  hubs, users, chat, search routing
+ sublevels client, ari(gl), web ──room-call──► relay ┘     │  hubs, users, chat, search routing
         ▲                                                 │  host.set_tree("sublevels.…")
         └──── replicated "sublevels.*" subtree ◄── relay ◄┘
                                                   │
@@ -66,8 +68,8 @@ D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 
 - **Packaging.** The server is a Python package (`sublevels`), run as
   `arisrvx --python -m sublevels.server`, and shipped on cvcpkg with its Python dependencies (all
   on cvcpkg for cp312 already, per §6.5). Under plain `python`, the service and its tests run
-  without arisrvx (S7 `ServerHarness`). The client components ship as a cvcpkg package of `.ari`
-  documents that the `nicotina` recipe depends on.
+  without arisrvx (S7 `ServerHarness`). The client ships as the `sublevels-client` cvcpkg package of `.ari`
+  documents, which depends on nicotina's and cyprty's component packages (docs/CLIENT_UI.md CU-D3).
 
 ## Layout
 
@@ -163,12 +165,12 @@ runners only.
     because NMDC is raw TCP and the web reverse proxy does not carry it.
 - **M2b, a hublist** (D16, P10): registrations on 2501, the pinger, `hublist.xml.bz2` over HTTP, operator moderation, the cluster's hubs, and the `+hublist` view. It is
   tested with DC++, AirDC++ and ncdc loading the list as black boxes.
-- **M3, nicotina native.** The client UI plan is [CLIENT_UI.md](CLIENT_UI.md): views, the state model, libcvc widgets U1-U7, and order C0-C5. Components in `client/` for the hub list, user list, main chat,
+- **M3, the sublevels client, native.** The client UI plan is [CLIENT_UI.md](CLIENT_UI.md): views, the state model, libcvc widgets U1-U7, and order C0-C5. Components in `client/` for the hub list, user list, main chat,
   private messages, search, the message of the day and rules, and relay-mode transfers (X8, X9)
-  between native clients. nicotina imports them and connects to a sublevels hub in `arigl`,
+  between native clients. The sublevels client mounts them and connects to a sublevels hub in `arigl`,
   `ari` (FTXUI, tvision) and the browser, with `ari snapshot` tests of each view. Vanilla and
   native users see each other.
-- **M4, nicotina on vanilla hubs.** The X-items in libcvc, then P8. nicotina connects to a vanilla
+- **M4, the sublevels client on vanilla hubs.** The X-items in libcvc, then P8. The client connects to a vanilla
   hub natively: chat, search, file lists, downloads and uploads with TTH, active and passive mode.
   It is tested against our hub and black-box third-party hubs (uhub, Verlihub, PtokaX). The
   browser reaches vanilla hubs through the service's WebSocket-to-TCP gateway, for chat and search
@@ -185,8 +187,8 @@ runners only.
 ## Open questions
 
 - **The forks.** When to archive transfix/eiskaltdcpp, transfix/eiskaltdcpp-py and
-  transfix/verlihub, and retire their catx-03 runners: proposed at M4, once nicotina replaces the
-  forked client for our own use.
+  transfix/verlihub, and retire their catx-03 runners: proposed at M4, once the sublevels client replaces
+  the forked client for our own use.
 - **Relay bandwidth.** Relay mode (D6) puts transfers on the host's uplink. Per-user and per-server
   limits, and whether relay mode is offered to every user or only some, are decided before M3
   ships it.
