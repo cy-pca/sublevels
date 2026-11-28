@@ -6,6 +6,8 @@
 - ``GET /documents/motd`` and ``GET /documents/rules``: the hub's message of the day and rules
   (D9), which anyone may read; ``PUT /admin/documents/<name>`` with ``{"text": ..., "by": ...}``
   replaces one.
+- ``GET /admin/connections/related?client_id=``: the addresses an id was seen at, and the other
+  ids seen at them (IDENTITY.md 3.8).
 - ``GET /admin/connections``: the connection log (D13), live and stored, filtered by ``nick``,
   ``address``, ``client_id`` or ``country``, newest first (``limit``, default 100).
 - ``GET /admin/bans``, ``POST /admin/bans`` (``{"target", "duration", "reason", "by"}``),
@@ -210,6 +212,12 @@ def create_app(service: Service) -> FastAPI:
         if e is None:
             raise HTTPException(404, f"no entry {address!r}")
         return await h.ping_one(e) or {"busy": True}
+
+    @app.get("/admin/connections/related", dependencies=[Depends(operator)])
+    def admin_related(client_id: str) -> dict:
+        if service.hub is None:
+            raise HTTPException(404, "no hub")
+        return service.hub.related(client_id)
 
     @app.get("/admin/hublists", dependencies=[Depends(operator)])
     def admin_hublists() -> dict:

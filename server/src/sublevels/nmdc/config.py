@@ -41,7 +41,13 @@ class HubConfig:
     nmdcs_listen: str = "0.0.0.0:4111"
     tls_cert: str = ""
     tls_key: str = ""
-    identity_salt: str = ""  # [D-9]: "" picks a random one per run
+    identity_salt: str = ""  # [D-9]: "" reads identity_salt_file, else a random one per run
+    # The salt's file, which the relay and TX.WTF are to share (IDENTITY.md 3.8, ARISRV L5);
+    # "" is <data_dir>/identity_salt.
+    identity_salt_file: str = ""
+    # Guests: unregistered nicks (IDENTITY.md 3.9). Off, only registered nicks log in; hub-list
+    # pingers, which are not users, still may.
+    allow_guests: bool = True
     publish_interval: float = 1.0  # seconds between writes of the sublevels.hubs subtree
     # The listen backlog: connections waiting for the loop to accept them. A burst of logins at
     # 6000+ users [D-7] overflows asyncio's default of 100.
@@ -126,7 +132,8 @@ class HubConfig:
                 "SUBLEVELS_DATA_DIR": "data_dir", "SUBLEVELS_GEOIP_DB": "geoip_db",
                 "SUBLEVELS_LOCATION_POLICY": "location_policy",
                 "SUBLEVELS_LOCATION_UNKNOWN": "location_unknown", "SUBLEVELS_CONNLOG": "connlog",
-                "SUBLEVELS_ACCOUNTS_FILE": "accounts_file", "SUBLEVELS_ZPIPE": "zpipe"}
+                "SUBLEVELS_ACCOUNTS_FILE": "accounts_file", "SUBLEVELS_ZPIPE": "zpipe",
+                "SUBLEVELS_IDENTITY_SALT_FILE": "identity_salt_file"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
@@ -176,7 +183,8 @@ class HubConfig:
                           "SUBLEVELS_TLS_REQUIRED": "tls_required",
                           "SUBLEVELS_COUNTRY_PREFIX": "country_prefix",
                           "SUBLEVELS_KICK_NOTICE_ALL": "kick_notice_all",
-                          "SUBLEVELS_PASSWORD_REQUIRES_TLS": "password_requires_tls"}.items():
+                          "SUBLEVELS_PASSWORD_REQUIRES_TLS": "password_requires_tls",
+                          "SUBLEVELS_ALLOW_GUESTS": "allow_guests"}.items():
             if env.get(var):
                 kw[name] = env[var].strip().lower() in ("1", "true", "yes", "on")
         if env.get("SUBLEVELS_RESERVED_NICKS"):
