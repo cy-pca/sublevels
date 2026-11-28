@@ -121,10 +121,13 @@ class Bans:
         os.replace(tmp, self.path)
 
     def add(self, kind: str, value: str, seconds: float | None, reason: str, by: str,
-            client_id: str = "") -> Ban:
+            client_id: str = "", addresses: list[str] | None = None) -> Ban:
+        """``addresses``: for an ``id:`` or ``nick:`` ban, where the id was last seen; the ban
+        covers them too (IDENTITY.md 3.8, D9: an NMDC id is only a hash of its addresses)."""
         now = self.wall()
         ban = Ban(self.next_id, kind, value, round(now, 3),
-                  None if seconds is None else round(now + seconds, 3), reason, by, client_id)
+                  None if seconds is None else round(now + seconds, 3), reason, by, client_id,
+                  {"addresses": list(addresses)} if addresses else {})
         self.next_id += 1
         self.bans[ban.id] = ban
         self._save()
@@ -166,6 +169,8 @@ class Bans:
                 return b
             if b.kind == "nick" and b.client_id and b.client_id == client_id:
                 return b
+            if b.kind in ("id", "nick") and ip in b.extra.get("addresses", ()):
+                return b  # an id's ban covers the addresses it was last seen at (D9)
         return None
 
     def at_nick(self, nick: str, registered: bool) -> Ban | None:
@@ -186,6 +191,8 @@ class Bans:
 
     def matches(self, ban: Ban, s) -> bool:
         """Whether ``ban`` covers session ``s`` (to close its connections when it is made)."""
+        if ban.kind in ("id", "nick") and s.ip in ban.extra.get("addresses", ()):
+            return True
         if ban.kind == "nick":
             return s.nick.casefold() == ban.value.casefold() or \
                 bool(ban.client_id and ban.client_id == s.identity)

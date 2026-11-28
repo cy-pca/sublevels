@@ -334,9 +334,10 @@ class Hub:
         """The server's salt for client ids: kept in the data directory, so ids (and the
         connection log's records of them) stay the same across restarts; random per run
         without one."""
-        if not self.config.data_dir:
+        path = self.config.identity_salt_file or (
+            os.path.join(self.config.data_dir, "identity_salt") if self.config.data_dir else "")
+        if not path:
             return secrets.token_hex(16)
-        path = os.path.join(self.config.data_dir, "identity_salt")
         try:
             with open(path, encoding="ascii") as f:
                 salt = f.read().strip()
@@ -345,7 +346,7 @@ class Hub:
         except OSError:
             pass
         salt = secrets.token_hex(16)
-        os.makedirs(self.config.data_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="ascii") as f:
             f.write(salt + "\n")
@@ -588,6 +589,12 @@ class Hub:
             self.close(s, f"nick refused ({why})")
             return
         registered = self.accounts.is_registered(nick)
+        if not registered and not self.config.allow_guests and not s.pinger:
+            s.nick = nick
+            self.bot_say(s, "This hub is for registered users only.")
+            self.counters.refuse("guests_off")
+            self.close(s, "guests off")
+            return
         if s.location_refusal and not self.policy.exempts(self.accounts, nick):
             s.nick = nick
             self._refuse_location(s, s.location_refusal)
@@ -826,6 +833,30 @@ class Hub:
                 "protocol": s.protocol, "tls": s.tls,
                 "bytes_in": s.bytes_in, "bytes_out": s.bytes_out, "pinger": s.pinger,
                 "close_reason": s.close_reason}
+
+    def addresses_of(self, client_id: str) -> list[str]:
+        """The addresses ``client_id`` is or was seen at: live connections, then the log's."""
+        seen = [s.ip for s in self.sessions.values() if s.identity == client_id
+                and s.state != CLOSED]
+        if self.connlog is not None:
+            seen += [r["address"] for r in self.connlog.query(client_id=client_id, limit=200)]
+        return list(dict.fromkeys(a for a in seen if a))
+
+    def related(self, client_id: str) -> dict:
+        """IDENTITY.md 3.8: the addresses an id was seen at, and the other ids seen there (a
+        native client and DC++ on one machine, say, or one household's NAT)."""
+        addrs = self.addresses_of(client_id)
+        others: dict[str, set] = {}
+        for a in addrs:
+            for s in self.sessions.values():
+                if s.ip == a and s.identity != client_id and s.state != CLOSED:
+                    others.setdefault(s.identity, set()).add(a)
+            if self.connlog is not None:
+                for r in self.connlog.query(address=a, limit=200):
+                    if r["client_id"] and r["client_id"] != client_id:
+                        others.setdefault(r["client_id"], set()).add(a)
+        return {"client_id": client_id, "addresses": addrs,
+                "others": {k: sorted(v) for k, v in sorted(others.items())}}
 
     def connections(self, **filters) -> dict:
         """The connection log for operators: the live connections that match, and the stored

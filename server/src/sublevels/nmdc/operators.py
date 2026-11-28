@@ -133,6 +133,9 @@ class Operators:
         elif RANK[role] < RANK["admin"] and seconds > hub.config.op_max_ban:
             raise OpError(f"An op's bans last at most {_span(hub.config.op_max_ban)}.")
         client_id = ""
+        addresses: list[str] = []
+        if kind == "id":
+            addresses = hub.addresses_of(value)[:16]
         if kind == "nick":
             from .hub import nick_key
             if nick_key(value) == hub.bot_key:
@@ -141,8 +144,9 @@ class Operators:
             if u is not None:
                 self._outranks(role, u, "ban")
                 client_id = u.identity
+                addresses = hub.addresses_of(u.identity)[:16]
         reason = reason.strip() or f"banned by {actor}"
-        b = hub.bans.add(kind, value, seconds, reason, actor, client_id)
+        b = hub.bans.add(kind, value, seconds, reason, actor, client_id, addresses)
         closed = []
         for s in list(hub.sessions.values()):
             if s.state != "closed" and hub.bans.matches(b, s) \
