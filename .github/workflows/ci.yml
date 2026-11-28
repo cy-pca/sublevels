@@ -148,6 +148,10 @@ jobs:
           ncdc --version | head -1
       - name: ncdc interop
         run: ${PY:-python} server/interop/ncdc_interop.py --out "$RUNNER_TEMP/interop"
+      - name: How ncdc shows a kick, a ban and a redirect (P6)
+        run: |
+          ${PY:-python} server/interop/operator_probe.py --ncdc "$(command -v ncdc)" --out "$RUNNER_TEMP/interop/operators"
+          cat "$RUNNER_TEMP/interop/operators/findings.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Findings
         if: always()
         run: cat "$RUNNER_TEMP/interop/findings.md" >> "$GITHUB_STEP_SUMMARY" || true
@@ -202,6 +206,11 @@ jobs:
         run: |
           ${PY:-python} server/interop/airdcpp_interop.py \
             --airdcppd "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" --out "$RUNNER_TEMP/interop"
+      - name: How AirDC++ shows a kick, a ban and a redirect (P6)
+        run: |
+          ${PY:-python} server/interop/operator_probe.py \
+            --airdcppd "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" --out "$RUNNER_TEMP/interop/operators"
+          cat "$RUNNER_TEMP/interop/operators/findings.md" >> "$GITHUB_STEP_SUMMARY"
       - name: ZPipe0, which framing AirDC++ takes (P7 §3)
         run: |
           ${PY:-python} server/interop/zpipe_probe.py \
