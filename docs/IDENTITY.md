@@ -1,7 +1,7 @@
 # One identity and one session across the sublevels app: design
 
-Status: proposed, 2026-11-26. Docs only; nothing here is built. Section 8 lists the decisions for
-Joe. It works out the roadmap's "Identity is TX.WTF's" (Architecture, D9, M2) for all three parts
+Status: decided (Joe, 2026-11-28: "go with the recommended decisions"). Docs only; nothing here is
+built. Section 8 lists the decisions. It works out the roadmap's "Identity is TX.WTF's" (Architecture, D9, M2) for all three parts
 of the app, and replaces nothing there.
 
 ## 1. What is asked
@@ -390,9 +390,11 @@ I2, the relay stays as it is: every client is a guest, named by itself.
   passwords for that hub, kept by the client, and have nothing to do with TX.WTF.
 - ADC (M5), whose login is different and gets its own section then.
 
-## 8. Decisions for Joe
+## 8. Decisions (Joe, 2026-11-28)
 
-| # | Question | Recommended |
+All taken as recommended.
+
+| # | Question | Decided |
 |---|---|---|
 | ID-D1 | The root identity | **The TX.WTF account** on the same host (3.1). The device key proves the device; the client id stays the device's (D9). Not the device key, not a binding record (4). |
 | ID-D2 | What the client shows the relay | **Its TX.WTF session token**, the one nicotina adopts, verified in process when TX.WTF is embedded and by `GET /user/` when it is external. Only the relay's own TX.WTF; an audience-bound token for other operators' relays later (5). |
