@@ -64,7 +64,8 @@ D1-D5 settled 2026-11-14 (Joe: "Draft the roadmap with those defaults"). D6-D10 
 - **Identity is TX.WTF's.** Native clients authenticate through the S5 `authenticate` hook with a
   TX.WTF token. NMDC clients log in by nick and password (`$GetPass`/`$MyPass`); the password is a
   hub password the user's TX.WTF account issues, checked against TX.WTF and never stored in the
-  clear. Users without an account connect as their registry client id (D9).
+  clear. Users without an account connect as their registry client id (D9). The design, guests
+  included, is [IDENTITY.md](IDENTITY.md).
 - **Packaging.** The server is a Python package (`sublevels`), run as
   `arisrvx --python -m sublevels.server`, and shipped on cvcpkg with its Python dependencies (all
   on cvcpkg for cp312 already, per §6.5). Under plain `python`, the service and its tests run
@@ -149,7 +150,7 @@ runners only.
     required in CI.
 - **M2, part of the host.**
   - Identity: registry client ids for every connection (D9), NMDC ones through the engine; TX.WTF accounts through S5 for native
-    clients and hub passwords for NMDC clients.
+    clients and hub passwords for NMDC clients ([IDENTITY.md](IDENTITY.md) phases I2-I3).
   - Policy (D9): message of the day and rules documents, kick as a warning, temporary and
     permanent bans by hash, account, address or range.
   - Public hub lists (D15, P9): push and pinger targets, all at once.
