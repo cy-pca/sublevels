@@ -204,6 +204,11 @@ jobs:
         run: |
           ${PY:-python} server/interop/airdcpp_interop.py \
             --airdcppd "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" --out "$RUNNER_TEMP/interop"
+      - name: ZPipe0, which framing AirDC++ takes (P7 §3)
+        run: |
+          ${PY:-python} server/interop/zpipe_probe.py \
+            --airdcppd "$RUNNER_TEMP/airdcpp/airdcpp-webclient/airdcppd" --out "$RUNNER_TEMP/interop/zpipe"
+          cat "$RUNNER_TEMP/interop/zpipe/findings.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Findings
         if: always()
         run: cat "$RUNNER_TEMP/interop/findings.md" >> "$GITHUB_STEP_SUMMARY" || true
@@ -248,6 +253,12 @@ jobs:
         run: |
           cvcpkg install eiskaltdcpp-py-cp312 --prefix "$RUNNER_TEMP/eiskalt"
           "$RUNNER_TEMP/eiskalt/bin/eiskaltdcpp-interop" --version
+      - name: ZPipe0, which framing EiskaltDC++ takes (P7 §3)
+        if: matrix.hub == 'nmdc'
+        run: |
+          ${PY:-python} server/interop/zpipe_probe.py \
+            --eiskaltdcpp-driver "$RUNNER_TEMP/eiskalt/bin/eiskaltdcpp-interop" --out "$RUNNER_TEMP/eiskalt-out/zpipe"
+          cat "$RUNNER_TEMP/eiskalt-out/zpipe/findings.md" >> "$GITHUB_STEP_SUMMARY"
       - name: EiskaltDC++ interop
         run: |
           ${PY:-python} server/interop/eiskaltdcpp_interop.py ${{ matrix.hub == 'nmdcs' && '--tls' || '' }} \

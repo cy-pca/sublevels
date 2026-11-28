@@ -96,6 +96,13 @@ class HubConfig:
     op_max_ban: float = 86400.0  # the longest ban an op (not an admin) may make, in seconds
     kick_notice_all: bool = False  # the "<op> is kicking <victim>" line to everyone, not just ops
     kick_reconnect_block: float = 0.0  # seconds a kick bans the victim's address (0: none)
+    # ZPipe0 (P7 §3): the user list at login, compressed, to clients that list ZPipe0. "on" writes
+    # $ZOn| and then one zlib stream, the framing AirDC++ 2.14.0 and EiskaltDC++ 2.6.2 both take
+    # (interop/zpipe_probe.py); "zon-blob" ($ZOn <stream>|, as [NMDC] prints it) is only for that
+    # probe: neither client takes it. Off by default until P7 §3 is written up from the probe.
+    # zpipe_min: the smallest list compressed.
+    zpipe: str = "off"
+    zpipe_min: int = 4096
     limits: Limits = field(default_factory=Limits)
 
     def with_(self, **kw) -> "HubConfig":
@@ -119,7 +126,7 @@ class HubConfig:
                 "SUBLEVELS_DATA_DIR": "data_dir", "SUBLEVELS_GEOIP_DB": "geoip_db",
                 "SUBLEVELS_LOCATION_POLICY": "location_policy",
                 "SUBLEVELS_LOCATION_UNKNOWN": "location_unknown", "SUBLEVELS_CONNLOG": "connlog",
-                "SUBLEVELS_ACCOUNTS_FILE": "accounts_file"}
+                "SUBLEVELS_ACCOUNTS_FILE": "accounts_file", "SUBLEVELS_ZPIPE": "zpipe"}
         for var, name in text.items():
             if env.get(var):
                 kw[name] = env[var]
@@ -161,6 +168,8 @@ class HubConfig:
                 kw[name] = float(env[var])
         if env.get("SUBLEVELS_HUBLIST_INTERVAL"):
             kw["hublist_interval"] = float(env["SUBLEVELS_HUBLIST_INTERVAL"])
+        if env.get("SUBLEVELS_ZPIPE_MIN"):
+            kw["zpipe_min"] = int(env["SUBLEVELS_ZPIPE_MIN"])
         if env.get("SUBLEVELS_MAX_USERS"):
             kw["max_users"] = int(env["SUBLEVELS_MAX_USERS"])
         for var, name in {"SUBLEVELS_STRICT_KEY": "strict_key",
