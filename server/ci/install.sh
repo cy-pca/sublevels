@@ -3,11 +3,11 @@
 # into ROOT/deps, as an operator installs them. ROOT/deps/bin/python3.12 is cvcpkg's CPython, the
 # one arisrvx embeds, and runs the tests with pycvc beside it.
 #
-# The pins: libcvc 4.0.9, the first release with both the native connection engine (N2,
-# transfix/libcvc#1434: SUBLEVELS_NMDC_TRANSPORT=engine) and the bridged-users API (#1302, the room
-# bridge), beside S2-S7. libcvc is pinned to the build arisrvx and pycvc-cp312 4.0.9+cvc.1 were
-# built against: 4.0.9+cvc.2, published 2026-11-25 17:50Z, minutes before them, and every libcvc
-# symbol either imports is defined there (checked with nm). Every pin matters: arisrvx and
+# The pins: libcvc 4.0.10, with the native connection engine (N2, transfix/libcvc#1434) and its
+# TLS (N3, #1552: NMDCS on the engine too), the bridged-users API (#1302, the room bridge), and
+# S2-S7. libcvc is pinned to the build arisrvx and pycvc-cp312 4.0.10+cvc.1 were built against:
+# 4.0.10+cvc.2, the only 4.0.10 libcvc for Linux, and every libcvc symbol either imports is
+# defined there (checked with nm: arisrvx 268, _pycvc.so 1359, none missing). Every pin matters: arisrvx and
 # pycvc-cp312 depend on libcvc with no version, and a libcvc republished under the same upstream
 # version has dropped symbols before (3.7.13+cvc.4 broke arisrvx 3.7.13+cvc.2). Move all three
 # together. ARIGL=1 adds arigl (the same release) with cvcpkg's Xvfb and Mesa, for the room
@@ -19,7 +19,7 @@ mkdir -p "$1"
 root=$(cd "$1" && pwd)
 deps=$root/deps
 
-LIBCVC=${LIBCVC:-4.0.9}
+LIBCVC=${LIBCVC:-4.0.10}
 LIBCVC_BUILD=${LIBCVC_BUILD:-cvc.2}
 ARISRVX_BUILD=${ARISRVX_BUILD:-cvc.1}
 extra=()

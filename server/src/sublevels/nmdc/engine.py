@@ -91,10 +91,12 @@ class EngineListener:
     net: object
     listener: object  # the net_listener
     own_engine: bool  # this module made the engine (plain python), so it stops it
+    protocol: str = "nmdc"
+    address: str = ""
     sessions: dict = field(default_factory=dict)  # conn id -> Session
 
     def addresses(self) -> list[tuple[str, str, int]]:
-        return [("nmdc", self.address, self.listener.port)]
+        return [(self.protocol, self.address, self.listener.port)]
 
     async def close(self, hub: Hub | None = None) -> None:
         self.net.stop_listening(int(self.listener))
@@ -109,30 +111,58 @@ class EngineListener:
             self.net.detach_loop()
 
 
-def start_engine_listener(hub: Hub, net=None, *, io_threads: int = 2) -> EngineListener:
-    """Listen for plain NMDC on ``hub.config.nmdc_listen`` with the engine ``net`` (``host.net``
-    in arisrvx; None makes one for this loop, under plain python)."""
+def make_engine(io_threads: int = 2):
+    """An engine for this loop, under plain python (arisrvx has its own: ``host.net``)."""
     from pycvc.ariadne import net as pnet
 
-    own = net is None
-    if own:
-        net = pnet.net_engine(pnet.engine_options(io_threads=io_threads))
-        net.attach_loop(asyncio.get_running_loop())
+    net = pnet.net_engine(pnet.engine_options(io_threads=io_threads))
+    net.attach_loop(asyncio.get_running_loop())
+    return net
+
+
+def tls_available(net) -> bool:
+    """Whether ``net`` can take TLS connections (libcvc N3, 4.0.10+, built with libssl)."""
+    f = getattr(net, "tls_available", None)
+    return bool(f is not None and f())
+
+
+def start_engine_listener(hub: Hub, net, *, own: bool = False, protocol: str = "nmdc",
+                          listen: str | None = None, tls: tuple[str, str] | None = None,
+                          watch_ms: int = 30000, ours: bool | None = None) -> EngineListener:
+    """Listen for NMDC (``protocol`` "nmdc", on ``hub.config.nmdc_listen``) or NMDCS ("nmdcs",
+    with ``tls``, a certificate and a key file) on the engine ``net``. ``own``: this listener stops
+    the engine when it closes. An NMDCS listener publishes its certificate's keyprint, and the
+    engine reloads the files when they change (every ``watch_ms``). ``ours``: the hub made the
+    engine (plain python), as against the host's (arisrvx's ``host.net``); ``own`` by default."""
+    from pycvc.ariadne import net as pnet
+
     lim = hub.limits
-    address, port = split_listen(hub.config.nmdc_listen)
-    listener = net.listen(
-        address=address, port=port, name="nmdc", frames=pnet.framing.delimited(b"|"),
-        backlog=hub.config.listen_backlog, max_frame=lim.online_message_max,
-        max_queued=lim.output_queue_max)
-    out = EngineListener(net, listener, own)
-    out.address = address
-    fanout = EngineFanout(net)
-    hub.engines.append(fanout)
+    address, port = split_listen(listen or hub.config.nmdc_listen)
+    kw = dict(address=address, port=port, name=protocol, frames=pnet.framing.delimited(b"|"),
+              backlog=hub.config.listen_backlog, max_frame=lim.online_message_max,
+              max_queued=lim.output_queue_max)
+    if tls is not None:
+        # TLS 1.2 and up (P7 §1), the engine's default minimum.
+        kw["tls"] = pnet.tls_options(certificate_file=tls[0], key_file=tls[1], watch=watch_ms)
+    listener = net.listen(**kw)
+    out = EngineListener(net, listener, own, protocol, address)
+    fanout = next((f for f in hub.engines if f.net is net), None)
+    if fanout is None:  # one per engine: its groups hold every listener's connections
+        fanout = EngineFanout(net)
+        hub.engines.append(fanout)
+    secure = tls is not None
+    if secure:
+        hub.set_keyprint(listener.keyprint)
+
+        @listener.on_tls_reload
+        def reloaded(keyprint):
+            log.info("NMDCS: certificate reloaded (%s)", keyprint)
+            hub.set_keyprint(keyprint)
 
     @listener.on_accept
     def accepted(conn, info):
         s = hub.connect(EngineConn(net, conn, fanout), info.peer_address, info.peer_port,
-                        "nmdc", False)
+                        protocol, secure)
         if s.state != "closed":
             out.sessions[conn] = s
         return None
@@ -169,6 +199,7 @@ def start_engine_listener(hub: Hub, net=None, *, io_threads: int = 2) -> EngineL
             why = _REASONS.get(reason, f"engine: {reason}")
         hub.disconnect(s, why)
 
-    log.info("NMDC: listening for nmdc on %s:%d (native engine, %d I/O threads, %s)", address,
-             listener.port, net.io_threads(), "its own" if own else "the host's")
+    log.info("NMDC: listening for %s on %s:%d (native engine, %d I/O threads, %s)", protocol,
+             address, listener.port, net.io_threads(),
+             "its own" if (own if ours is None else ours) else "the host's")
     return out

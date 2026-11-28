@@ -207,11 +207,17 @@ class Listeners:
     servers: list = field(default_factory=list)
     tls: TlsContext | None = None
     watcher: asyncio.Task | None = None
-    engine: object = None  # the plain NMDC listener on the native engine (engine.EngineListener)
+    # The listeners on the native engine (engine.EngineListener): plain NMDC, and NMDCS when the
+    # engine has TLS. The one that made the engine (plain python) is first, and closes last.
+    engines: list = field(default_factory=list)
+
+    @property
+    def engine(self):
+        return self.engines[0] if self.engines else None
 
     def addresses(self) -> list[tuple[str, str, int]]:
         """(protocol, host, port) of each listening socket."""
-        out = list(self.engine.addresses()) if self.engine is not None else []
+        out = [a for e in self.engines for a in e.addresses()]
         for proto, server in self.servers:
             for sock in server.sockets or []:
                 name = sock.getsockname()
@@ -228,8 +234,8 @@ class Listeners:
                 hub.close(s, "hub shutting down")
         for _, server in self.servers:
             await server.wait_closed()
-        if self.engine is not None:
-            await self.engine.close(hub)
+        for e in reversed(self.engines):
+            await e.close(hub)
 
 
 async def _watch_cert(tls: TlsContext, every: float) -> None:
@@ -258,34 +264,59 @@ async def start_listeners(hub: Hub, *, cert_check_every: float = 30.0, net=None)
     """Listen as ``hub.config`` says: ``nmdc_listen`` (plain) and ``nmdcs_listen`` (TLS, with
     ``tls_cert`` and ``tls_key``); either may be "off". NMDCS without a certificate is skipped with
     a warning. With ``transport`` "engine" (or "auto", resolved by ``pick_transport``), plain NMDC
-    is on the native engine (``net``, else one made for this loop); NMDCS stays here."""
+    is on the native engine (``net``, else one made for this loop), and so is NMDCS when the
+    engine has TLS (libcvc N3, 4.0.10); otherwise NMDCS is on the loop's own sockets here."""
     hub.config = hub.config.with_(transport=pick_transport(hub.config))
     cfg = hub.config
     loop = asyncio.get_running_loop()
     out = Listeners()
-    if cfg.nmdc_listen != "off" and cfg.transport == "engine":
-        from .engine import available, start_engine_listener
+    on_engine = cfg.transport == "engine"
+    if on_engine:
+        from .engine import available, make_engine
 
         if not available():
             raise RuntimeError("SUBLEVELS_NMDC_TRANSPORT=engine, but this pycvc has no connection "
                                "engine (libcvc N2, transfix/libcvc#1434)")
-        out.engine = start_engine_listener(hub, net, io_threads=cfg.net_threads)
+        own = ours = net is None
+        if own:
+            net = make_engine(cfg.net_threads)
+    if cfg.nmdc_listen != "off" and on_engine:
+        from .engine import start_engine_listener
+
+        out.engines.append(start_engine_listener(hub, net, own=own, ours=ours))
+        own = False
     elif cfg.nmdc_listen != "off":
         h, p = split_listen(cfg.nmdc_listen)
         server = await loop.create_server(lambda: NmdcConnection(hub, "nmdc", False), h, p,
                                           backlog=cfg.listen_backlog)
         out.servers.append(("nmdc", server))
     if cfg.nmdcs_listen != "off":
+        from .engine import tls_available
+
         if not (cfg.tls_cert and cfg.tls_key):
             log.warning("NMDCS: no certificate configured (SUBLEVELS_TLS_CERT, SUBLEVELS_TLS_KEY): "
                         "not listening on %s", cfg.nmdcs_listen)
+        elif on_engine and tls_available(net):
+            from .engine import start_engine_listener
+
+            out.engines.append(start_engine_listener(
+                hub, net, own=own, protocol="nmdcs", listen=cfg.nmdcs_listen,
+                tls=(cfg.tls_cert, cfg.tls_key), watch_ms=int(cert_check_every * 1000),
+                ours=ours))
+            own = False
         else:
+            if on_engine:
+                log.info("NMDCS: this engine has no TLS (libcvc before 4.0.10, or no libssl): "
+                         "NMDCS stays on the loop's own sockets")
             out.tls = TlsContext(cfg.tls_cert, cfg.tls_key, on_reload=hub.set_keyprint)
             h, p = split_listen(cfg.nmdcs_listen)
             server = await loop.create_server(lambda: NmdcConnection(hub, "nmdcs", True), h, p,
                                               ssl=out.tls.context, backlog=cfg.listen_backlog)
             out.servers.append(("nmdcs", server))
             out.watcher = loop.create_task(_watch_cert(out.tls, cert_check_every))
+    if on_engine and own:  # the engine is ours, but no listener took it: stop it
+        await asyncio.to_thread(net.stop)
+        net.detach_loop()
     for proto, host, port in out.addresses():
         log.info("NMDC: listening for %s on %s:%d", proto, host, port)
     return out

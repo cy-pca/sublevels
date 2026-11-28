@@ -26,12 +26,10 @@ name: ci
 #
 # The interop, transfers, soak and bridge-e2e jobs run on both of the hub's plain-NMDC transports
 # (SUBLEVELS_NMDC_TRANSPORT, set on every leg): asyncio, and libcvc's native connection engine
-# (pycvc 4.0.9 from cvcpkg). The default, auto, is the engine where pycvc has it. NMDCS stays on asyncio either way until the engine has TLS (libcvc N3), so a leg's
-# engine coverage is its plain-NMDC connections: interop-ncdc's ncdcA and ncdcC (ncdcB is NMDCS),
-# interop-airdcpp, interop-eiskaltdcpp (nmdc) and transfers (nmdc) in full, and in
-# interop-eiskaltdcpp (nmdcs) the redirect to the plain address, and in transfers (nmdcs) only
-# the plain session the TLS-only hub turns away. The arisrvx job runs the socket tests on both and smokes the engine as
-# arisrvx's own (host.net).
+# (pycvc 4.0.10 from cvcpkg). The default, auto, is the engine where pycvc has it. Since libcvc
+# 4.0.10 (N3, TLS in the engine) NMDCS is on the engine too, so an engine leg's connections are
+# all on it, plain and TLS. The arisrvx job runs the socket tests on both and smokes the engine as
+# arisrvx's own (host.net), NMDC and NMDCS.
 #
 # GitHub-hosted runners only: this repository is public, and a pull request's workflows must
 # never reach the self-hosted runners on catx-03.
@@ -75,7 +73,7 @@ jobs:
       # And the ServerHarness tests (libcvc S7, in the set server/ci/install.sh pins).
       SUBLEVELS_REQUIRE_HARNESS: '1'
       # And the room bridge's harness test (arisrvx's bridged-users API), and the socket tests on
-      # the native connection engine (libcvc 4.0.9).
+      # the native connection engine (libcvc 4.0.10, with TLS).
       SUBLEVELS_REQUIRE_BRIDGE: '1'
       SUBLEVELS_REQUIRE_ENGINE: '1'
     steps:
@@ -138,7 +136,7 @@ jobs:
           python-version: '3.12'
       - uses: ./.github/actions/setup-cvcpkg
         if: matrix.transport == 'engine'
-      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+      - name: The engine (pycvc 4.0.10 from cvcpkg; the hub runs on its python)
         if: matrix.transport == 'engine'
         run: |
           bash server/ci/install.sh ~/sublevels-ci
@@ -184,7 +182,7 @@ jobs:
           python-version: '3.12'
       - uses: ./.github/actions/setup-cvcpkg
         if: matrix.transport == 'engine'
-      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+      - name: The engine (pycvc 4.0.10 from cvcpkg; the hub runs on its python)
         if: matrix.transport == 'engine'
         run: |
           bash server/ci/install.sh ~/sublevels-ci
@@ -244,7 +242,7 @@ jobs:
         with:
           python-version: '3.12'
       - uses: ./.github/actions/setup-cvcpkg
-      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+      - name: The engine (pycvc 4.0.10 from cvcpkg; the hub runs on its python)
         if: matrix.transport == 'engine'
         run: |
           bash server/ci/install.sh ~/sublevels-ci
@@ -322,7 +320,7 @@ jobs:
           python-version: '3.12'
       - uses: ./.github/actions/setup-cvcpkg
         if: matrix.transport == 'engine'
-      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+      - name: The engine (pycvc 4.0.10 from cvcpkg; the hub runs on its python)
         if: matrix.transport == 'engine'
         run: |
           bash server/ci/install.sh ~/sublevels-ci
@@ -373,7 +371,7 @@ jobs:
           python-version: '3.12'
       - uses: ./.github/actions/setup-cvcpkg
         if: matrix.transport == 'engine'
-      - name: The engine (pycvc 4.0.9 from cvcpkg; the hub runs on its python)
+      - name: The engine (pycvc 4.0.10 from cvcpkg; the hub runs on its python)
         if: matrix.transport == 'engine'
         run: |
           bash server/ci/install.sh ~/sublevels-ci
@@ -396,8 +394,8 @@ jobs:
 
   bridge-e2e:
     # The room bridge through libcvc's real host code (server/interop/bridge_e2e.py): `sublevels
-    # serve` (arisrvx 4.0.9, the bridged-users API) with an NMDC client "zed", and an Ariadne client
-    # (arigl 4.0.9 in conference mode running server/interop/bridge_client.ari, under cvcpkg's Xvfb
+    # serve` (arisrvx 4.0.10, the bridged-users API) with an NMDC client "zed", and an Ariadne client
+    # (arigl 4.0.10 in conference mode running server/interop/bridge_client.ari, under cvcpkg's Xvfb
     # and Mesa) in the same room: the room lists zed, chat goes both ways, and a direct message
     # gets its reply.
     name: bridge-e2e (${{ matrix.transport }})
@@ -410,7 +408,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-cvcpkg
-      - name: Install arisrvx, pycvc and arigl 4.0.9, Xvfb and Mesa (cvcpkg)
+      - name: Install arisrvx, pycvc and arigl 4.0.10, Xvfb and Mesa (cvcpkg)
         run: ARIGL=1 bash server/ci/install.sh ~/sublevels-ci
       - name: Xvfb
         run: |

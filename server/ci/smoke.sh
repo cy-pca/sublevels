@@ -135,6 +135,12 @@ case "${SUBLEVELS_NMDC_TRANSPORT:-auto}" in
         fi ;;
   asyncio) if grep -q "listening for nmdc on .* (native engine" "$log"; then fail "SUBLEVELS_NMDC_TRANSPORT=asyncio, but plain NMDC is on the engine"; fi ;;
 esac
+# On the engine, with libcvc 4.0.10's TLS (N3), NMDCS must be on it too, and publish its keyprint.
+if [[ "${tls_env[0]}" != SUBLEVELS_NMDCS_LISTEN=off && "${SUBLEVELS_NMDC_TRANSPORT:-auto}" != asyncio \
+      && "${SUBLEVELS_REQUIRE_ENGINE:-}" == 1 ]]; then
+  grep -q "listening for nmdcs on .* (native engine, .* the host's)" "$log" || fail "NMDCS is not on arisrvx's engine (libcvc N3)"
+  grep -q '"nmdcs_keyprint":"SHA256/' <<<"$stats" || fail "/admin/stats: NMDCS on the engine published no keyprint"
+fi
 # A host with the bridged-users API (libcvc 4.0.2) must have started the room bridge.
 if "$arisrvx" python -c 'from pycvc.ariadne import Host; assert hasattr(Host, "room_presence")' 2>/dev/null; then
   grep -q "room bridge: NMDC users join room" "$log" || fail "this arisrvx has the bridged-users API, but the room bridge did not start"

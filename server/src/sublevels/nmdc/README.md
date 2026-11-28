@@ -27,10 +27,11 @@ Connect implementation, and a change here names the spec sections it implements.
 The hub runs on the arisrvx script loop with the HTTP API and the room-call exports. Plain NMDC
 has two transports behind one seam: libcvc's native connection engine, whose I/O threads split
 input on `|`, queue output and write it, or the loop's own asyncio sockets. `SUBLEVELS_NMDC_TRANSPORT`
-chooses: `auto` (the default) is the engine when pycvc has it (libcvc 4.0.9+) and no capture
+chooses: `auto` (the default) is the engine when pycvc has it (libcvc 4.0.9+; NMDCS with 4.0.10) and no capture
 directory is set, else asyncio; `engine` requires it; `asyncio` is the fallback. Every fan-out is a send to one of the hub's groups (`all`,
 `hello`, `search`, `search_active`, `ops`, `ops_userip`): on the engine, one `broadcast()` for the
-group, however large. NMDCS stays on asyncio until the engine has TLS (N3). The hub knows a
+group, however large. NMDCS is on the engine too where the engine has TLS (N3, libcvc 4.0.10),
+else on asyncio. The hub knows a
 connection only by `write()` and `close()`, so its tests (`server/tests/test_nmdc_p*.py`) run
 without sockets; `test_nmdc_listener.py` runs it on real ones.
 

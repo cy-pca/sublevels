@@ -124,13 +124,15 @@ def make_cert(tmp_path, name="hub"):
 
 
 @needs_openssl
-def test_nmdcs_login(tmp_path):
+def test_nmdcs_login(tmp_path, transport):
     cert, key = make_cert(tmp_path)
 
     async def go():
         hub, listeners, ports = await hub_on(HubConfig(nmdc_listen="off",
                                                        nmdcs_listen="127.0.0.1:0",
-                                                       tls_cert=cert, tls_key=key))
+                                                       tls_cert=cert, tls_key=key,
+                                                       transport=transport))
+        assert bool(listeners.engines) == (transport == "engine")  # NMDCS on the engine (N3)
         c = Client("secure")
         await c.connect("127.0.0.1", ports["nmdcs"], tls=True)
         await c.login()
@@ -211,7 +213,9 @@ def test_capture_records_both_ways(tmp_path):
 
 
 @needs_openssl
-def test_keyprint_matches_openssl_and_follows_reloads(tmp_path):
+def test_keyprint_matches_openssl_and_follows_reloads(tmp_path, transport):
+    """On asyncio the hub reloads the files itself; on the engine (N3) its watch does, and
+    on_tls_reload gives the hub the new keyprint."""
     import base64
 
     from sublevels.nmdc.listener import keyprint_of
@@ -225,9 +229,12 @@ def test_keyprint_matches_openssl_and_follows_reloads(tmp_path):
     assert keyprint_of(cert) == expect and len(expect) == len("SHA256/") + 52
 
     async def go():
-        hub, listeners, ports = await hub_on(HubConfig(
-            nmdc_listen="off", nmdcs_listen="127.0.0.1:0", tls_cert=cert, tls_key=key,
-            nmdcs_address="nmdcs://hub.example:4111"))
+        hub = Hub(HubConfig(nmdc_listen="off", nmdcs_listen="127.0.0.1:0", tls_cert=cert,
+                            tls_key=key, nmdcs_address="nmdcs://hub.example:4111",
+                            transport=transport))
+        listeners = await start_listeners(hub, cert_check_every=0.2)
+        on_engine = bool(listeners.engines)
+        assert on_engine == (transport == "engine")
         assert hub.keyprint == expect
         assert hub.nmdcs_url() == f"nmdcs://hub.example:4111/?kp={expect}"
         assert hub.stats()["nmdcs_keyprint"] == expect
@@ -236,7 +243,13 @@ def test_keyprint_matches_openssl_and_follows_reloads(tmp_path):
         shutil.copy(new_key, key)
         import os
         os.utime(cert, ns=(5, 6))
-        assert listeners.tls.reload_if_changed()
+        if on_engine:
+            for _ in range(50):  # the watch loads it once both files have kept their times
+                if hub.keyprint != expect:
+                    break
+                await asyncio.sleep(0.1)
+        else:
+            assert listeners.tls.reload_if_changed()
         assert hub.keyprint == keyprint_of(new_cert) != expect
         await listeners.close(hub)
 
